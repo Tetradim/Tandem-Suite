@@ -42,6 +42,27 @@ The local run starts:
 - Tandem API connector at `http://127.0.0.1:3101`
 - Vite UI at `http://localhost:3100`, proxying `/api` to the connector
 
+## Windows Launcher
+
+Double-click `Launch-Sentinel-Tandem.bat`, or run:
+
+```powershell
+.\Launch-Sentinel-Tandem.ps1
+```
+
+The launcher installs dependencies when `node_modules` is missing, builds the suite when build output is missing, starts the Tandem server, and opens a dedicated browser window.
+
+Useful launcher options:
+
+```powershell
+.\Launch-Sentinel-Tandem.ps1 -Port 3100 -EdgeApiUrl http://localhost:8001 -PulseApiUrl http://localhost:8002
+.\Launch-Sentinel-Tandem.ps1 -PulseEdgeApiKey "your-pulse-key"
+.\Launch-Sentinel-Tandem.ps1 -InstallDeps -Rebuild
+.\Launch-Sentinel-Tandem.ps1 -NoBrowser
+```
+
+Close the launcher window or the dedicated browser window to stop the Tandem process started by the launcher.
+
 ## Production Build
 
 ```powershell
