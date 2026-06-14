@@ -144,6 +144,26 @@ function Find-Npm {
     return Find-CommandPath -Names @("npm.cmd", "npm.exe", "npm")
 }
 
+function Get-DotEnvValue {
+    param(
+        [string]$Path,
+        [string]$Name
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return "" }
+    $escapedName = [regex]::Escape($Name)
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        if ($line -match "^\s*$escapedName\s*=\s*(.*)\s*$") {
+            $value = $Matches[1].Trim()
+            if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+            return $value
+        }
+    }
+    return ""
+}
+
 function Find-BrowserExecutable {
     $candidates = @(
         "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe",
@@ -575,11 +595,20 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE." }
     }
 
+    $envFile = Join-Path $ProjectRoot ".env"
+    $localEnvFile = Join-Path $ProjectRoot ".env.local"
+
     if (-not $EdgeApiUrl) { $EdgeApiUrl = $env:EDGE_API_URL }
+    if (-not $EdgeApiUrl) { $EdgeApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "EDGE_API_URL" }
+    if (-not $EdgeApiUrl) { $EdgeApiUrl = Get-DotEnvValue -Path $envFile -Name "EDGE_API_URL" }
     if (-not $EdgeApiUrl) { $EdgeApiUrl = "http://localhost:8001" }
     if (-not $PulseApiUrl) { $PulseApiUrl = $env:PULSE_API_URL }
+    if (-not $PulseApiUrl) { $PulseApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_API_URL" }
+    if (-not $PulseApiUrl) { $PulseApiUrl = Get-DotEnvValue -Path $envFile -Name "PULSE_API_URL" }
     if (-not $PulseApiUrl) { $PulseApiUrl = "http://localhost:8002" }
     if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = $env:PULSE_EDGE_API_KEY }
+    if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_EDGE_API_KEY" }
+    if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = Get-DotEnvValue -Path $envFile -Name "PULSE_EDGE_API_KEY" }
 
     $env:EDGE_API_URL = $EdgeApiUrl
     $env:PULSE_API_URL = $PulseApiUrl
