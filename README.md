@@ -1,14 +1,62 @@
 # Sentinel Tandem Suite
 
-Sentinel Tandem Suite is the unified operator console for Sentinel Edge and Sentinel Pulse.
+Unified operator console for Sentinel Edge and Sentinel Pulse.
 
-It keeps the bots separate:
+Tandem Suite keeps the Sentinel services separate and visible. Edge remains the analysis, readiness, signal, and risk-decision service. Pulse remains the broker-facing execution service. Tandem runs a small server-side connector, reads both services, normalizes their status, and presents one focused operations dashboard.
 
-- **Sentinel Edge** remains the analysis, signal, and risk-decision service.
-- **Sentinel Pulse** remains the broker-facing execution service.
-- **Tandem Suite** runs a small server-side connector, reads both services, and presents one operations dashboard.
+Tandem is intentionally read-only in its current scope. It does not place broker orders, does not send handoff commands, and does not expose the Pulse Edge API key to browser JavaScript.
 
-All dashboard data comes from Edge and Pulse API responses. If either service is unavailable, the UI shows the real connection or API failure.
+## Current Feature Map
+
+| Area | Current capability |
+|------|--------------------|
+| System Pair | Shows Edge liveness/readiness and Pulse health/Edge API status side by side. |
+| Readiness | Reads Edge `/api/ready` and surfaces readiness status plus failing check details. |
+| Automation | Reads Edge `/api/automation`, including mode, enabled state, and last handoff metadata when present. |
+| Pulse account | Reads Pulse `/api/edge/account/status` through the Tandem server and shows broker-backed equity, cash, open positions, and P&L where available. |
+| Edge Pulse mirror | Reads Edge `/api/pulse/account` and `/api/pulse/positions` to compare what Edge believes Pulse reported. |
+| Tickers | Reads Pulse `/api/edge/tickers` and uses ticker trailing-state metadata for protected-position counts. |
+| Trade state | Builds one shared trade-state view from Pulse positions, Edge positions, and latest Edge decision data. |
+| Drift monitor | Compares Pulse position price against Edge position or decision price and classifies drift severity. |
+| Handoff inbox | Shows Edge's last handoff payload/status if `/api/automation` reports it. |
+| Event journal | Shows a compact response journal for Edge liveness, Edge readiness, Pulse health, and Pulse Edge API calls. |
+| Server-side secret handling | Keeps `PULSE_EDGE_API_KEY` on the Tandem Express server; the browser receives only normalized results/errors. |
+| Local launcher | Starts Tandem, opens a dedicated browser profile, and closes the server when the browser closes or vice versa. |
+| Simulation support | Can point both Edge and Pulse URLs at Sentinel Simulation Engine to test dashboard behavior without a broker. |
+
+## Architecture
+
+```text
+Browser
+  |
+  | React + Vite
+  | GET /api/tandem/config
+  | GET /api/tandem/snapshot
+  v
+Tandem Express Connector
+  |-- reads EDGE_API_URL
+  |-- reads PULSE_API_URL
+  |-- attaches PULSE_EDGE_API_KEY only server-side
+  |-- normalizes successes, HTTP failures, timeouts, and missing config
+  v
+Sentinel Edge API                 Sentinel Pulse API
+  |-- /api/live                    |-- /api/health
+  |-- /api/ready                   |-- /api/edge/status
+  |-- /api/automation              |-- /api/edge/account/status
+  |-- /api/decisions               |-- /api/edge/tickers
+  |-- /api/pulse/*                 |
+```
+
+The UI is intentionally built from real service responses. If Edge, Pulse, or the simulation engine is down, Tandem shows the concrete endpoint failure rather than substituting demo data.
+
+## Safety Model
+
+- Tandem is a visibility and coordination surface.
+- Current actions are read-only.
+- Broker-affecting controls should stay in Edge or Pulse until Tandem has explicit confirmation, audit logging, role gating, and owner-service contracts.
+- `PULSE_EDGE_API_KEY` is consumed only by `server/index.ts`.
+- Do not expose broker-capable Pulse endpoints directly from public browser routes.
+- For internet deployment, put Tandem behind authentication and keep Edge/Pulse on private network routes.
 
 ## Configuration
 
@@ -20,13 +68,20 @@ Copy-Item .env.example .env.local
 
 Environment variables:
 
-- `EDGE_API_URL`: Sentinel Edge backend URL. Default: `http://localhost:8001`
-- `PULSE_API_URL`: Sentinel Pulse backend URL. Default: `http://localhost:8002`
-- `PULSE_EDGE_API_KEY`: API key Pulse expects for `/api/edge/*` endpoints. This stays on the Tandem server.
-- `REFRESH_MS`: Dashboard refresh interval in milliseconds. Default: `5000`
-- `PORT`: Tandem production server port. Default: `3100`
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `EDGE_API_URL` | `http://localhost:8001` | Sentinel Edge backend URL. |
+| `PULSE_API_URL` | `http://localhost:8002` | Sentinel Pulse backend URL. |
+| `PULSE_EDGE_API_KEY` | unset | API key Pulse expects for `/api/edge/*`; stays on Tandem server. |
+| `REFRESH_MS` | `5000` | Dashboard refresh interval in milliseconds. |
+| `PORT` | `3100` in production, `3101` for dev connector | Tandem server port. |
 
-For a public internet deployment, put Tandem behind authentication and keep Edge/Pulse on private network routes. Do not expose a Pulse broker-capable key from static browser JavaScript.
+Launcher flags can override Edge/Pulse URLs and Pulse key for local sessions:
+
+```powershell
+.\Launch-Sentinel-Tandem.ps1 -Port 3100 -EdgeApiUrl http://localhost:8001 -PulseApiUrl http://localhost:8002
+.\Launch-Sentinel-Tandem.ps1 -PulseEdgeApiKey "your-pulse-key"
+```
 
 ## Local Run
 
@@ -35,9 +90,13 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:3100`.
+Open:
 
-The local run starts:
+```text
+http://localhost:3100
+```
+
+The local dev command starts:
 
 - Tandem API connector at `http://127.0.0.1:3101`
 - Vite UI at `http://localhost:3100`, proxying `/api` to the connector
@@ -50,8 +109,6 @@ Double-click `Launch-Sentinel-Tandem.bat`, or run:
 .\Launch-Sentinel-Tandem.ps1
 ```
 
-The launcher installs dependencies when `node_modules` is missing, builds the suite when build output is missing, starts the Tandem server, and opens a dedicated browser window.
-
 Useful launcher options:
 
 ```powershell
@@ -59,15 +116,96 @@ Useful launcher options:
 .\Launch-Sentinel-Tandem.ps1 -PulseEdgeApiKey "your-pulse-key"
 .\Launch-Sentinel-Tandem.ps1 -InstallDeps -Rebuild
 .\Launch-Sentinel-Tandem.ps1 -NoBrowser
+.\Launch-Sentinel-Tandem.ps1 -SmokeTest
 ```
 
-Close the launcher window or the dedicated browser window to stop the Tandem process started by the launcher.
+The launcher:
+
+1. Resolves Node and npm.
+2. Installs dependencies when `node_modules` is missing or `-InstallDeps` is passed.
+3. Builds the suite when build output is missing or `-Rebuild` is passed.
+4. Starts the Tandem server on the selected port.
+5. Verifies the suite responds.
+6. Opens a dedicated Edge/Chrome app window with a temporary browser profile unless `-NoBrowser` is set.
+7. Starts a hidden watchdog so closing the launcher window closes the dedicated browser profile and owned server process.
+8. Watches the dedicated browser window and stops Tandem if the browser closes.
+
+This lifecycle matches the local launchers for Sentinel Pulse, Sentinel Edge, and Sentinel Simulation Engine.
+
+## Simulation Engine Mode
+
+For broker-free Tandem testing, point both bot URLs at Sentinel Simulation Engine:
+
+```powershell
+$env:EDGE_API_URL = "http://127.0.0.1:9200"
+$env:PULSE_API_URL = "http://127.0.0.1:9200"
+$env:PULSE_EDGE_API_KEY = "local-sim-key"
+npm run dev
+```
+
+Or with the launcher:
+
+```powershell
+.\Launch-Sentinel-Tandem.ps1 -EdgeApiUrl http://127.0.0.1:9200 -PulseApiUrl http://127.0.0.1:9200 -PulseEdgeApiKey local-sim-key
+```
+
+In this setup, Tandem reads both Edge-facing and Pulse-facing contracts from the same simulation state.
 
 ## Production Build
 
 ```powershell
 npm run build
 npm start
+```
+
+`npm run build` compiles both the server TypeScript project and the React/Vite client.
+
+## Connector Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/tandem/config` | Browser-safe active config: Edge URL, Pulse URL, refresh interval, and whether the Pulse key is configured. |
+| GET | `/api/tandem/snapshot` | Aggregated Edge/Pulse snapshot with per-service `ok`, status, latency, data, and error fields. |
+
+Snapshot source calls:
+
+| Source | Endpoint |
+|--------|----------|
+| Edge | `/api/live` |
+| Edge | `/api/ready` |
+| Edge | `/api/automation` |
+| Edge | `/api/decisions` |
+| Edge | `/api/pulse/handoff/schema` |
+| Edge | `/api/pulse/account` |
+| Edge | `/api/pulse/positions` |
+| Pulse | `/api/health` |
+| Pulse | `/api/edge/status` |
+| Pulse | `/api/edge/account/status` |
+| Pulse | `/api/edge/tickers` |
+
+## Verification
+
+```powershell
+npm run build
+.\Launch-Sentinel-Tandem.ps1 -SmokeTest
+git diff --check
+```
+
+Use the Simulation Engine mode for a local end-to-end dashboard check without broker access.
+
+## Repository Layout
+
+```text
+.
+|-- server/index.ts                  # Express connector and snapshot aggregator
+|-- src/App.tsx                      # Tandem dashboard
+|-- src/api.ts                       # Browser API helpers
+|-- src/types.ts                     # Normalized service/result types
+|-- src/styles.css                   # Dashboard styling
+|-- Launch-Sentinel-Tandem.ps1       # Windows lifecycle launcher
+|-- Launch-Sentinel-Tandem.bat
+|-- package.json
+`-- README.md
 ```
 
 ## Current Scope
