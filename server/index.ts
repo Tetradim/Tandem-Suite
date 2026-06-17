@@ -19,11 +19,11 @@ import type {
 dotenv.config({ path: '.env' });
 dotenv.config({ path: '.env.local', override: true });
 
-const DEFAULT_EDGE_URL = 'http://localhost:8001';
-const DEFAULT_PULSE_URL = 'http://localhost:8002';
+const DEFAULT_EDGE_URL = 'http://localhost:8000';
+const DEFAULT_PULSE_URL = 'http://localhost:8001';
 const DEFAULT_REFRESH_MS = 5000;
-const DEFAULT_PRODUCTION_PORT = 3100;
-const DEFAULT_API_PORT = 3101;
+const DEFAULT_PRODUCTION_PORT = 3005;
+const DEFAULT_API_PORT = 8005;
 const REQUEST_TIMEOUT_MS = 4500;
 
 function stripTrailingSlash(value: string) {

@@ -70,16 +70,16 @@ Environment variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `EDGE_API_URL` | `http://localhost:8001` | Sentinel Edge backend URL. |
-| `PULSE_API_URL` | `http://localhost:8002` | Sentinel Pulse backend URL. |
+| `EDGE_API_URL` | `http://localhost:8000` | Sentinel Edge backend URL. |
+| `PULSE_API_URL` | `http://localhost:8001` | Sentinel Pulse backend URL. |
 | `PULSE_EDGE_API_KEY` | unset | API key Pulse expects for `/api/edge/*`; stays on Tandem server. |
 | `REFRESH_MS` | `5000` | Dashboard refresh interval in milliseconds. |
-| `PORT` | `3100` in production, `3101` for dev connector | Tandem server port. |
+| `PORT` | `3005` in single-port production, `8005` for the dev connector | Tandem server port. |
 
 Launcher flags can override Edge/Pulse URLs and Pulse key for local sessions:
 
 ```powershell
-.\Launch-Sentinel-Tandem.ps1 -Port 3100 -EdgeApiUrl http://localhost:8001 -PulseApiUrl http://localhost:8002
+.\Launch-Sentinel-Tandem.ps1 -BackendPort 8005 -FrontendPort 3005 -EdgeApiUrl http://localhost:8000 -PulseApiUrl http://localhost:8001
 .\Launch-Sentinel-Tandem.ps1 -PulseEdgeApiKey "your-pulse-key"
 ```
 
@@ -93,13 +93,13 @@ npm run dev
 Open:
 
 ```text
-http://localhost:3100
+http://localhost:3005
 ```
 
 The local dev command starts:
 
-- Tandem API connector at `http://127.0.0.1:3101`
-- Vite UI at `http://localhost:3100`, proxying `/api` to the connector
+- Tandem API connector at `http://127.0.0.1:8005`
+- Vite UI at `http://localhost:3005`, proxying `/api` to the connector
 
 ## Windows Launcher
 
@@ -112,7 +112,7 @@ Double-click `Launch-Sentinel-Tandem.bat`, or run:
 Useful launcher options:
 
 ```powershell
-.\Launch-Sentinel-Tandem.ps1 -Port 3100 -EdgeApiUrl http://localhost:8001 -PulseApiUrl http://localhost:8002
+.\Launch-Sentinel-Tandem.ps1 -BackendPort 8005 -FrontendPort 3005 -EdgeApiUrl http://localhost:8000 -PulseApiUrl http://localhost:8001
 .\Launch-Sentinel-Tandem.ps1 -PulseEdgeApiKey "your-pulse-key"
 .\Launch-Sentinel-Tandem.ps1 -InstallDeps -Rebuild
 .\Launch-Sentinel-Tandem.ps1 -NoBrowser
@@ -123,8 +123,8 @@ The launcher:
 
 1. Resolves Node and npm.
 2. Installs dependencies when `node_modules` is missing or `-InstallDeps` is passed.
-3. Builds the suite when build output is missing or `-Rebuild` is passed.
-4. Starts the Tandem server on the selected port.
+3. Starts the Tandem API/backend on the selected backend port.
+4. Starts the Vite UI on the selected frontend port.
 5. Verifies the suite responds.
 6. Opens a dedicated Edge/Chrome app window with a temporary browser profile unless `-NoBrowser` is set.
 7. Starts a hidden watchdog so closing the launcher window closes the dedicated browser profile and owned server process.

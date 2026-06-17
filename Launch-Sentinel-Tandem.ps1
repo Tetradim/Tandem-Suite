@@ -2,7 +2,9 @@
 # Starts the Tandem server and opens the operator dashboard.
 
 param(
-    [int]$Port = 3100,
+    [int]$BackendPort = 8005,
+    [int]$FrontendPort = 3005,
+    [int]$Port = 3005,
     [string]$EdgeApiUrl = "",
     [string]$PulseApiUrl = "",
     [string]$PulseEdgeApiKey = "",
@@ -11,10 +13,14 @@ param(
     [switch]$NoBrowser,
     [switch]$InstallDeps,
     [switch]$Rebuild,
+    [switch]$SinglePort,
     [switch]$SmokeTest
 )
 
 $ErrorActionPreference = "Stop"
+if ($PSBoundParameters.ContainsKey("Port") -and -not $PSBoundParameters.ContainsKey("FrontendPort")) {
+    $FrontendPort = $Port
+}
 $ProjectRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
 if (-not $ProjectRoot) { $ProjectRoot = (Get-Location).Path }
 
@@ -548,7 +554,7 @@ if ($SmokeTest) {
     if (-not $quotedArgs.Contains('"--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelTandem-Browser-1234"')) {
         throw "Browser argument quoting smoke test failed."
     }
-    $pathArgs = Join-ProcessArguments -Arguments @("dist-server\server\index.js", "--port", "3100")
+    $pathArgs = Join-ProcessArguments -Arguments @("dist-server\server\index.js", "--port", "3005")
     if (-not $pathArgs.Contains("dist-server\server\index.js") -or -not $pathArgs.Contains("--port")) {
         throw "Server argument smoke test failed."
     }
@@ -589,7 +595,7 @@ try {
 
     $serverEntry = Join-Path $ProjectRoot "dist-server\server\index.js"
     $uiEntry = Join-Path $ProjectRoot "dist\index.html"
-    if ($Rebuild -or -not (Test-Path $serverEntry) -or -not (Test-Path $uiEntry)) {
+    if ($SinglePort -and ($Rebuild -or -not (Test-Path $serverEntry) -or -not (Test-Path $uiEntry))) {
         Write-Status "Building Tandem Suite"
         & $npm run build
         if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE." }
@@ -601,11 +607,11 @@ try {
     if (-not $EdgeApiUrl) { $EdgeApiUrl = $env:EDGE_API_URL }
     if (-not $EdgeApiUrl) { $EdgeApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "EDGE_API_URL" }
     if (-not $EdgeApiUrl) { $EdgeApiUrl = Get-DotEnvValue -Path $envFile -Name "EDGE_API_URL" }
-    if (-not $EdgeApiUrl) { $EdgeApiUrl = "http://localhost:8001" }
+    if (-not $EdgeApiUrl) { $EdgeApiUrl = "http://localhost:8000" }
     if (-not $PulseApiUrl) { $PulseApiUrl = $env:PULSE_API_URL }
     if (-not $PulseApiUrl) { $PulseApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_API_URL" }
     if (-not $PulseApiUrl) { $PulseApiUrl = Get-DotEnvValue -Path $envFile -Name "PULSE_API_URL" }
-    if (-not $PulseApiUrl) { $PulseApiUrl = "http://localhost:8002" }
+    if (-not $PulseApiUrl) { $PulseApiUrl = "http://localhost:8001" }
     if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = $env:PULSE_EDGE_API_KEY }
     if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_EDGE_API_KEY" }
     if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = Get-DotEnvValue -Path $envFile -Name "PULSE_EDGE_API_KEY" }
@@ -614,8 +620,6 @@ try {
     $env:PULSE_API_URL = $PulseApiUrl
     $env:PULSE_EDGE_API_KEY = $PulseEdgeApiKey
     $env:REFRESH_MS = "$RefreshMs"
-    $env:PORT = "$Port"
-    $env:NODE_ENV = "production"
 
     Write-Status "Edge API: $EdgeApiUrl"
     Write-Status "Pulse API: $PulseApiUrl"
@@ -624,6 +628,79 @@ try {
     } else {
         Write-Status "Pulse Edge API key is not configured; protected Pulse Edge endpoints will report unavailable." "WARN"
     }
+
+    if (-not $SinglePort) {
+        $env:PORT = "$BackendPort"
+        $env:NODE_ENV = "development"
+        $backendUrl = "http://127.0.0.1:$BackendPort"
+        $frontendUrl = "http://127.0.0.1:$FrontendPort"
+
+        if (Test-PortOpen -Port $BackendPort) {
+            if (-not (Test-TandemSuite -Port $BackendPort)) {
+                throw "Backend port $BackendPort is already in use by another service. Stop that service or launch Tandem with -BackendPort <free port>."
+            }
+            Stop-PortOwnerProcess -Port $BackendPort -Label "Sentinel Tandem API"
+        }
+
+        if (-not (Test-PortOpen -Port $BackendPort)) {
+            Write-Status "Starting Tandem API on port $BackendPort"
+            Start-OwnedProcess -FilePath $npm -ArgumentList @("exec", "--", "tsx", "server/index.ts", "--port", "$BackendPort") -WorkingDirectory $ProjectRoot | Out-Null
+            if (-not (Wait-Port -Port $BackendPort -Seconds 30)) {
+                throw "Tandem API did not open port $BackendPort. Check $LogFile."
+            }
+            if (-not (Wait-TandemSuite -Port $BackendPort -Seconds 45)) {
+                throw "Port $BackendPort opened, but it is not responding as Sentinel Tandem Suite. Check $LogFile."
+            }
+            Write-Status "Tandem API is ready" "OK"
+        }
+
+        if (Test-PortOpen -Port $FrontendPort) {
+            if (-not (Test-TandemUi -Port $FrontendPort)) {
+                throw "Frontend port $FrontendPort is already in use by another service. Stop that service or launch Tandem with -FrontendPort <free port>."
+            }
+            Stop-PortOwnerProcess -Port $FrontendPort -Label "Sentinel Tandem UI"
+        }
+
+        if (-not (Test-PortOpen -Port $FrontendPort)) {
+            Write-Status "Starting Tandem Vite UI on port $FrontendPort"
+            Start-OwnedProcess -FilePath $npm -ArgumentList @("exec", "--", "vite", "--host", "127.0.0.1", "--port", "$FrontendPort") -WorkingDirectory $ProjectRoot | Out-Null
+            if (-not (Wait-Port -Port $FrontendPort -Seconds 45)) {
+                throw "Tandem UI did not open port $FrontendPort. Check $LogFile."
+            }
+            if (-not (Test-TandemUi -Port $FrontendPort)) {
+                throw "Tandem UI opened port $FrontendPort, but the dashboard did not respond as expected."
+            }
+            Write-Status "Tandem UI is ready" "OK"
+        }
+
+        if (-not $NoBrowser) {
+            $BrowserProcess = Start-BrowserWindow -Url $frontendUrl
+        }
+        Start-LauncherShutdownWatchdog
+
+        Write-Host ""
+        Write-Host "Ready: $frontendUrl" -ForegroundColor Green
+        Write-Host "Backend: $backendUrl" -ForegroundColor Gray
+        Write-Host "Close this window or press Ctrl+C to stop Tandem Suite." -ForegroundColor Gray
+        Write-Host ""
+
+        while ($true) {
+            foreach ($process in @($OwnedProcesses)) {
+                if ($process.HasExited) {
+                    throw "Process $($process.Id) exited unexpectedly."
+                }
+            }
+            if (Test-BrowserWindowClosed) {
+                Write-Status "Browser window closed; shutting down Sentinel Tandem Suite" "OK"
+                break
+            }
+            Start-Sleep -Seconds 1
+        }
+        return
+    }
+
+    $env:PORT = "$Port"
+    $env:NODE_ENV = "production"
 
     if (Test-PortOpen -Port $Port) {
         if (-not (Test-TandemSuite -Port $Port)) {
