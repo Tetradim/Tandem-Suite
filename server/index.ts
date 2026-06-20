@@ -4,6 +4,7 @@ import express from 'express';
 import helmet from 'helmet';
 import fs from 'node:fs';
 import path from 'node:path';
+import { listEvents, publishEvent } from './botEventBus.js';
 import type {
   EdgeAutomation,
   EdgeDecisionFeed,
@@ -123,6 +124,57 @@ async function fetchJson<T>(baseUrl: string, endpoint: string, headers: HeadersI
   }
 }
 
+async function postJson<T>(baseUrl: string, endpoint: string, body: unknown, headers: HeadersInit = {}): Promise<ServiceResult<T>> {
+  const started = performance.now();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${baseUrl}${endpoint}`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const latencyMs = Math.round(performance.now() - started);
+    const contentType = response.headers.get('content-type') || '';
+    const payload = contentType.includes('application/json') ? await response.json() : undefined;
+
+    if (!response.ok) {
+      return {
+        ok: false,
+        data: payload as T,
+        status: response.status,
+        latencyMs,
+        updatedAt: new Date().toISOString(),
+        error: getErrorMessage(payload, `${response.status} ${response.statusText}`),
+      };
+    }
+
+    return {
+      ok: true,
+      data: payload as T,
+      status: response.status,
+      latencyMs,
+      updatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    const isAbort = error instanceof Error && error.name === 'AbortError';
+    return {
+      ok: false,
+      latencyMs: Math.round(performance.now() - started),
+      updatedAt: new Date().toISOString(),
+      error: isAbort ? `Request timed out after ${REQUEST_TIMEOUT_MS} ms` : error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 function pulseEdgeHeaders(): HeadersInit | null {
   const apiKey = process.env.PULSE_EDGE_API_KEY;
   return apiKey ? { 'X-API-Key': apiKey } : null;
@@ -182,6 +234,7 @@ const port = numberFrom(cliValue('--port') || process.env.PORT, process.env.NODE
 
 app.disable('x-powered-by');
 app.use(compression());
+app.use(express.json({ limit: '512kb' }));
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -203,6 +256,63 @@ app.get('/api/tandem/config', (_request, response) => {
 
 app.get('/api/tandem/snapshot', async (_request, response) => {
   response.json(await loadSnapshot());
+});
+
+app.get('/api/tandem/bus/events', (request, response) => {
+  const limit = numberFrom(String(request.query.limit || ''), 100);
+  const target = typeof request.query.target === 'string' ? request.query.target : undefined;
+  const events = listEvents(limit, target);
+  response.json({ events, count: events.length });
+});
+
+app.post('/api/tandem/bus/events', (request, response) => {
+  try {
+    response.json({ event: publishEvent(request.body || {}) });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get('/api/tandem/bus/ecosystem', async (request, response) => {
+  const config = suiteConfig();
+  const limit = numberFrom(String(request.query.limit || ''), 100);
+  const pulseHeaders = pulseEdgeHeaders() || {};
+  const localEvents = listEvents(limit);
+  const [edge, pulse] = await Promise.all([
+    fetchJson(config.edgeBaseUrl, `/api/bus/events?limit=${limit}`),
+    fetchJson(config.pulseBaseUrl, `/api/bus/events?limit=${limit}`, pulseHeaders),
+  ]);
+  response.json({
+    local: { ok: true, data: { events: localEvents, count: localEvents.length }, updatedAt: new Date().toISOString() },
+    edge,
+    pulse,
+  });
+});
+
+app.post('/api/tandem/bus/relay', async (request, response) => {
+  const config = suiteConfig();
+  const body = request.body || {};
+  const target = String(body.targetService || body.target_service || '').trim().toLowerCase();
+  const endpoint = String(body.endpoint || '/api/bus/events');
+  const event = body.event || body;
+  const pulseHeaders = pulseEdgeHeaders() || {};
+  const routes: Record<string, { baseUrl: string; headers?: HeadersInit }> = {
+    edge: { baseUrl: config.edgeBaseUrl },
+    pulse: { baseUrl: config.pulseBaseUrl, headers: pulseHeaders },
+  };
+  const route = routes[target];
+  if (!route) {
+    response.status(400).json({ error: 'targetService must be edge or pulse' });
+    return;
+  }
+  const relay = await postJson(route.baseUrl, endpoint, event, route.headers || {});
+  publishEvent({
+    event_type: 'tandem.relay.attempted',
+    source: 'tandem-suite',
+    target,
+    payload: { endpoint, relay },
+  });
+  response.json({ relay });
 });
 
 if (fs.existsSync(distIndex)) {
