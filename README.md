@@ -132,6 +132,34 @@ The launcher:
 
 This lifecycle matches the local launchers for Sentinel Pulse, Sentinel Edge, and Sentinel Simulation Engine.
 
+## macOS Beta Installer
+
+MacBook beta testers can install the local source build with the bundled macOS installer script. It installs npm dependencies and adds a double-click launcher to the Desktop.
+
+Prerequisites:
+
+- macOS
+- Node.js 20+ with `npm`
+- Running Sentinel Edge and Sentinel Pulse services, or Sentinel Simulation Engine for broker-free testing
+
+From the repository root:
+
+```bash
+chmod +x install-macos.sh
+./install-macos.sh
+```
+
+After installation, double-click `Sentinel Tandem Suite.command` on the Desktop. Logs are written to `~/Desktop/Sentinel-Tandem-Suite.log`.
+
+Manual launch options:
+
+```bash
+./install-macos.sh --launch
+./install-macos.sh --launch --edge-api-url http://127.0.0.1:8000 --pulse-api-url http://127.0.0.1:8001
+./install-macos.sh --launch --pulse-edge-api-key "your-pulse-key"
+./install-macos.sh --launch --backend-port 8005 --frontend-port 3005 --no-browser
+```
+
 ## Simulation Engine Mode
 
 For broker-free Tandem testing, point both bot URLs at Sentinel Simulation Engine:

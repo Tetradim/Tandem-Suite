@@ -5,7 +5,14 @@ import helmet from 'helmet';
 import fs from 'node:fs';
 import path from 'node:path';
 import { listEvents, publishEvent } from './botEventBus.js';
+import {
+  buildChromeBridgeHealthEvent,
+  buildChromeBridgeMessageEvent,
+  isLocalBridgeAddress,
+} from './chromeDiscordBridge.js';
+import type { Request, Response } from 'express';
 import type {
+  AnyPayload,
   EdgeAutomation,
   EdgeDecisionFeed,
   EdgeReadiness,
@@ -175,55 +182,206 @@ async function postJson<T>(baseUrl: string, endpoint: string, body: unknown, hea
     clearTimeout(timeout);
   }
 }
+
 function pulseEdgeHeaders(): HeadersInit | null {
   const apiKey = process.env.PULSE_EDGE_API_KEY;
   return apiKey ? { 'X-API-Key': apiKey } : null;
+}
+
+function ensureLocalBridgeRequest(request: Request, response: Response) {
+  if (String(process.env.CHROME_BRIDGE_ALLOW_REMOTE || '').toLowerCase().match(/^(1|true|yes)$/)) {
+    return true;
+  }
+  if (isLocalBridgeAddress(request.ip) || isLocalBridgeAddress(request.socket.remoteAddress)) {
+    return true;
+  }
+  response.status(403).json({ error: 'chrome bridge endpoint only accepts local requests' });
+  return false;
 }
 
 async function loadSnapshot(): Promise<SuiteSnapshot> {
   const config = suiteConfig();
   const pulseHeaders = pulseEdgeHeaders();
   const missingPulseKey = 'PULSE_EDGE_API_KEY is not configured on the Tandem server.';
+  const edge = <T = AnyPayload>(endpoint: string) => fetchJson<T>(config.edgeBaseUrl, endpoint);
+  const pulse = <T = AnyPayload>(endpoint: string) => fetchJson<T>(config.pulseBaseUrl, endpoint);
+  const pulseEdge = <T>(endpoint: string) =>
+    pulseHeaders ? fetchJson<T>(config.pulseBaseUrl, endpoint, pulseHeaders) : Promise.resolve(configError<T>(missingPulseKey));
 
   const [
     edgeLive,
+    edgeHealth,
     edgeReady,
+    edgeRateLimit,
+    edgeStats,
+    edgeNotifications,
+    edgeMarkets,
+    edgeQueue,
+    edgeTickers,
+    edgeProvidersHealth,
+    edgeMarketDataProviders,
     edgeAutomation,
     edgeDecisions,
+    edgeStrategies,
+    edgePuzzleKey,
+    edgeDryRun,
+    edgeSimulationLab,
+    edgeBacktestRuns,
+    edgeScannerCatalog,
+    edgeConfigHash,
+    edgeCorrelation,
     edgeHandoffSchema,
+    edgePulseStatus,
     edgePulseAccount,
     edgePulsePositions,
+    edgePulseQueue,
     pulseHealth,
     pulseEdgeStatus,
     pulseAccount,
     pulseTickers,
+    pulseBotStatus,
+    pulseBotSnapshot,
+    pulseStrategiesRegistry,
+    pulseStrategiesPresets,
+    pulseTrades,
+    pulsePositions,
+    pulsePendingSells,
+    pulseBrokers,
+    pulseBrokerStatus,
+    pulseMarkets,
+    pulseFxRates,
+    pulseReplayStatus,
+    pulseReplaySessions,
+    pulseRateLimits,
+    pulseAuditLogs,
+    pulseTraces,
+    pulseSettings,
+    pulseRiskStatus,
+    pulseRiskLimits,
+    pulseReconciliationSummary,
+    pulsePortfolioStats,
+    pulseOrders,
+    pulseOrderStats,
+    pulseAnalyticsPortfolio,
+    pulseOpsServices,
+    pulseSloSummary,
   ] = await Promise.all([
-    fetchJson<Record<string, unknown>>(config.edgeBaseUrl, '/api/live'),
-    fetchJson<EdgeReadiness>(config.edgeBaseUrl, '/api/ready'),
-    fetchJson<EdgeAutomation>(config.edgeBaseUrl, '/api/automation'),
-    fetchJson<EdgeDecisionFeed>(config.edgeBaseUrl, '/api/decisions'),
-    fetchJson<Record<string, unknown>>(config.edgeBaseUrl, '/api/pulse/handoff/schema'),
-    fetchJson<Record<string, unknown>>(config.edgeBaseUrl, '/api/pulse/account'),
-    fetchJson<Record<string, unknown>>(config.edgeBaseUrl, '/api/pulse/positions'),
-    fetchJson<Record<string, unknown>>(config.pulseBaseUrl, '/api/health'),
-    pulseHeaders ? fetchJson<PulseEdgeStatus>(config.pulseBaseUrl, '/api/edge/status', pulseHeaders) : Promise.resolve(configError<PulseEdgeStatus>(missingPulseKey)),
-    pulseHeaders ? fetchJson<PulseAccount>(config.pulseBaseUrl, '/api/edge/account/status', pulseHeaders) : Promise.resolve(configError<PulseAccount>(missingPulseKey)),
-    pulseHeaders ? fetchJson<PulseTickerResponse>(config.pulseBaseUrl, '/api/edge/tickers', pulseHeaders) : Promise.resolve(configError<PulseTickerResponse>(missingPulseKey)),
+    edge<Record<string, unknown>>('/api/live'),
+    edge('/api/health'),
+    edge<EdgeReadiness>('/api/ready'),
+    edge('/api/rate-limit/status'),
+    edge('/api/stats'),
+    edge('/api/notifications/status'),
+    edge('/api/markets'),
+    edge('/api/queue'),
+    edge('/api/tickers'),
+    edge('/api/providers/health'),
+    edge('/api/market-data/providers'),
+    edge<EdgeAutomation>('/api/automation'),
+    edge<EdgeDecisionFeed>('/api/decisions'),
+    edge('/api/strategies'),
+    edge('/api/strategies/puzzle-key/status'),
+    edge('/api/dry-run/status'),
+    edge('/api/simulation-lab/status'),
+    edge('/api/backtest/runs'),
+    edge('/api/scanner-workbench/catalog'),
+    edge('/api/config/hash'),
+    edge('/api/correlation'),
+    edge<Record<string, unknown>>('/api/pulse/handoff/schema'),
+    edge('/api/pulse/status'),
+    edge<Record<string, unknown>>('/api/pulse/account'),
+    edge<Record<string, unknown>>('/api/pulse/positions'),
+    edge('/api/pulse/queue'),
+    pulse<Record<string, unknown>>('/api/health'),
+    pulseEdge<PulseEdgeStatus>('/api/edge/status'),
+    pulseEdge<PulseAccount>('/api/edge/account/status'),
+    pulseEdge<PulseTickerResponse>('/api/edge/tickers'),
+    pulse('/api/bot/status'),
+    pulse('/api/bot/snapshot'),
+    pulse('/api/strategies/registry'),
+    pulse('/api/strategies/presets'),
+    pulse('/api/trades'),
+    pulse('/api/positions'),
+    pulse('/api/positions/pending-sells'),
+    pulse('/api/brokers'),
+    pulse('/api/brokers/status'),
+    pulse('/api/markets'),
+    pulse('/api/fx-rates'),
+    pulse('/api/replay/status'),
+    pulse('/api/replay/sessions'),
+    pulse('/api/rate-limits'),
+    pulse('/api/audit-logs'),
+    pulse('/api/traces'),
+    pulse('/api/settings'),
+    pulse('/api/risk/status'),
+    pulse('/api/risk/limits'),
+    pulse('/api/reconciliation/summary'),
+    pulse('/api/portfolio/stats'),
+    pulse('/api/orders'),
+    pulse('/api/orders/stats'),
+    pulse('/api/analytics/portfolio'),
+    pulse('/api/ops/services'),
+    pulse('/api/slo/summary'),
   ]);
 
   return {
     config,
     edgeLive,
+    edgeHealth,
     edgeReady,
+    edgeRateLimit,
+    edgeStats,
+    edgeNotifications,
+    edgeMarkets,
+    edgeQueue,
+    edgeTickers,
+    edgeProvidersHealth,
+    edgeMarketDataProviders,
     edgeAutomation,
     edgeDecisions,
+    edgeStrategies,
+    edgePuzzleKey,
+    edgeDryRun,
+    edgeSimulationLab,
+    edgeBacktestRuns,
+    edgeScannerCatalog,
+    edgeConfigHash,
+    edgeCorrelation,
     edgeHandoffSchema,
+    edgePulseStatus,
     edgePulseAccount,
     edgePulsePositions,
+    edgePulseQueue,
     pulseHealth,
     pulseEdgeStatus,
     pulseAccount,
     pulseTickers,
+    pulseBotStatus,
+    pulseBotSnapshot,
+    pulseStrategiesRegistry,
+    pulseStrategiesPresets,
+    pulseTrades,
+    pulsePositions,
+    pulsePendingSells,
+    pulseBrokers,
+    pulseBrokerStatus,
+    pulseMarkets,
+    pulseFxRates,
+    pulseReplayStatus,
+    pulseReplaySessions,
+    pulseRateLimits,
+    pulseAuditLogs,
+    pulseTraces,
+    pulseSettings,
+    pulseRiskStatus,
+    pulseRiskLimits,
+    pulseReconciliationSummary,
+    pulsePortfolioStats,
+    pulseOrders,
+    pulseOrderStats,
+    pulseAnalyticsPortfolio,
+    pulseOpsServices,
+    pulseSloSummary,
   };
 }
 
@@ -273,20 +431,55 @@ app.post('/api/tandem/bus/events', (request, response) => {
   }
 });
 
+app.post('/api/discord/chrome-bridge/message', (request, response) => {
+  try {
+    if (!ensureLocalBridgeRequest(request, response)) return;
+    const event = buildChromeBridgeMessageEvent(request.body || {});
+    const rawText = String(event.payload?.raw_text || '');
+    if (!rawText.trim()) {
+      response.status(400).json({ error: 'message content or embed text is required' });
+      return;
+    }
+    const accepted = publishEvent(event);
+    response.json({
+      status: 'accepted',
+      event_id: String(event.payload?.event_id || ''),
+      raw_text: rawText,
+      bus_event_id: accepted.event_id,
+    });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post('/api/discord/chrome-bridge/heartbeat', (request, response) => {
+  try {
+    if (!ensureLocalBridgeRequest(request, response)) return;
+    const event = buildChromeBridgeHealthEvent(request.body || {});
+    const accepted = publishEvent(event);
+    const healthy = Boolean(event.payload?.healthy);
+    response.json({
+      healthy,
+      status: healthy ? 'healthy' : 'unhealthy',
+      issues: healthy ? [] : ['chrome bridge is disabled or not ok'],
+      last_heartbeat: event.payload,
+      bus_event_id: accepted.event_id,
+    });
+  } catch (error) {
+    response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
 app.get('/api/tandem/bus/ecosystem', async (request, response) => {
   const config = suiteConfig();
   const limit = numberFrom(String(request.query.limit || ''), 100);
   const pulseHeaders = pulseEdgeHeaders() || {};
-  const localEvents = listEvents(limit);
-  const [edge, pulse] = await Promise.all([
+  const [local, edge, pulse] = await Promise.all([
+    Promise.resolve({ ok: true, data: { events: listEvents(limit), count: listEvents(limit).length }, updatedAt: new Date().toISOString() }),
     fetchJson(config.edgeBaseUrl, `/api/bus/events?limit=${limit}`),
     fetchJson(config.pulseBaseUrl, `/api/bus/events?limit=${limit}`, pulseHeaders),
   ]);
-  response.json({
-    local: { ok: true, data: { events: localEvents, count: localEvents.length }, updatedAt: new Date().toISOString() },
-    edge,
-    pulse,
-  });
+  response.json({ local, edge, pulse });
 });
 
 app.post('/api/tandem/bus/relay', async (request, response) => {
