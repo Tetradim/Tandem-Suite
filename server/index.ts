@@ -5,11 +5,13 @@ import helmet from 'helmet';
 import fs from 'node:fs';
 import path from 'node:path';
 import { listEvents, publishEvent } from './botEventBus.js';
+import { evaluateBusIngressPolicy } from './busIngressPolicy.js';
 import {
   buildChromeBridgeHealthEvent,
   buildChromeBridgeMessageEvent,
   isLocalBridgeAddress,
 } from './chromeDiscordBridge.js';
+import { evaluateRelayPolicy } from './relayPolicy.js';
 import type { Request, Response } from 'express';
 import type {
   AnyPayload,
@@ -32,6 +34,7 @@ const DEFAULT_PULSE_URL = 'http://localhost:8001';
 const DEFAULT_REFRESH_MS = 5000;
 const DEFAULT_PRODUCTION_PORT = 3005;
 const DEFAULT_API_PORT = 8005;
+const DEFAULT_LISTEN_HOST = '127.0.0.1';
 const REQUEST_TIMEOUT_MS = 4500;
 
 function stripTrailingSlash(value: string) {
@@ -49,6 +52,10 @@ function cliValue(name: string) {
 function numberFrom(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function resolveListenHost() {
+  return (cliValue('--host') || process.env.HOST || DEFAULT_LISTEN_HOST).trim() || DEFAULT_LISTEN_HOST;
 }
 
 function suiteConfig(): SuiteConfig {
@@ -296,32 +303,32 @@ async function loadSnapshot(): Promise<SuiteSnapshot> {
     pulseEdge<PulseEdgeStatus>('/api/edge/status'),
     pulseEdge<PulseAccount>('/api/edge/account/status'),
     pulseEdge<PulseTickerResponse>('/api/edge/tickers'),
-    pulse('/api/bot/status'),
-    pulse('/api/bot/snapshot'),
-    pulse('/api/strategies/registry'),
-    pulse('/api/strategies/presets'),
-    pulse('/api/trades'),
-    pulse('/api/positions'),
-    pulse('/api/positions/pending-sells'),
-    pulse('/api/brokers'),
-    pulse('/api/brokers/status'),
-    pulse('/api/markets'),
-    pulse('/api/fx-rates'),
-    pulse('/api/replay/status'),
-    pulse('/api/replay/sessions'),
-    pulse('/api/rate-limits'),
-    pulse('/api/audit-logs'),
+    pulseEdge<AnyPayload>('/api/edge/bot/status'),
+    pulseEdge<AnyPayload>('/api/edge/bot/snapshot'),
+    pulseEdge<AnyPayload>('/api/edge/strategies/registry'),
+    pulseEdge<AnyPayload>('/api/edge/strategies/presets'),
+    pulseEdge<AnyPayload>('/api/edge/trades'),
+    pulseEdge<AnyPayload>('/api/edge/positions'),
+    pulseEdge<AnyPayload>('/api/edge/positions/pending-sells'),
+    pulseEdge<AnyPayload>('/api/edge/brokers/status'),
+    pulseEdge<AnyPayload>('/api/edge/brokers/status'),
+    pulseEdge<AnyPayload>('/api/edge/markets'),
+    pulseEdge<AnyPayload>('/api/edge/fx-rates'),
+    pulseEdge<AnyPayload>('/api/edge/replay/status'),
+    pulseEdge<AnyPayload>('/api/edge/replay/sessions'),
+    pulseEdge<AnyPayload>('/api/edge/rate-limits'),
+    pulseEdge<AnyPayload>('/api/edge/audit-logs'),
     pulse('/api/traces'),
-    pulse('/api/settings'),
-    pulse('/api/risk/status'),
-    pulse('/api/risk/limits'),
-    pulse('/api/reconciliation/summary'),
-    pulse('/api/portfolio/stats'),
-    pulse('/api/orders'),
-    pulse('/api/orders/stats'),
-    pulse('/api/analytics/portfolio'),
-    pulse('/api/ops/services'),
-    pulse('/api/slo/summary'),
+    pulseEdge<AnyPayload>('/api/edge/settings'),
+    pulseEdge<AnyPayload>('/api/edge/risk/status'),
+    pulseEdge<AnyPayload>('/api/edge/risk/limits'),
+    pulseEdge<AnyPayload>('/api/edge/reconciliation/summary'),
+    pulseEdge<AnyPayload>('/api/edge/portfolio/stats'),
+    pulseEdge<AnyPayload>('/api/edge/orders'),
+    pulseEdge<AnyPayload>('/api/edge/orders/stats'),
+    pulseEdge<AnyPayload>('/api/edge/analytics/portfolio'),
+    pulseEdge<AnyPayload>('/api/edge/ops/services'),
+    pulseEdge<AnyPayload>('/api/edge/slo/summary'),
   ]);
 
   return {
@@ -389,6 +396,7 @@ const app = express();
 const distPath = path.resolve(process.cwd(), 'dist');
 const distIndex = path.join(distPath, 'index.html');
 const port = numberFrom(cliValue('--port') || process.env.PORT, process.env.NODE_ENV === 'production' ? DEFAULT_PRODUCTION_PORT : DEFAULT_API_PORT);
+const host = resolveListenHost();
 
 app.disable('x-powered-by');
 app.use(compression());
@@ -425,6 +433,16 @@ app.get('/api/tandem/bus/events', (request, response) => {
 
 app.post('/api/tandem/bus/events', (request, response) => {
   try {
+    const policy = evaluateBusIngressPolicy({
+      enabled: process.env.TANDEM_BUS_INGRESS_ENABLED,
+      expectedSecret: process.env.TANDEM_BUS_INGRESS_SECRET,
+      providedSecret: request.get('X-Tandem-Bus-Secret'),
+      event: request.body || {},
+    });
+    if (!policy.allowed) {
+      response.status(policy.status).json({ error: policy.error });
+      return;
+    }
     response.json({ event: publishEvent(request.body || {}) });
   } catch (error) {
     response.status(400).json({ error: error instanceof Error ? error.message : String(error) });
@@ -485,25 +503,36 @@ app.get('/api/tandem/bus/ecosystem', async (request, response) => {
 app.post('/api/tandem/bus/relay', async (request, response) => {
   const config = suiteConfig();
   const body = request.body || {};
-  const target = String(body.targetService || body.target_service || '').trim().toLowerCase();
-  const endpoint = String(body.endpoint || '/api/bus/events');
-  const event = body.event || body;
-  const pulseHeaders = pulseEdgeHeaders() || {};
-  const routes: Record<string, { baseUrl: string; headers?: HeadersInit }> = {
-    edge: { baseUrl: config.edgeBaseUrl },
-    pulse: { baseUrl: config.pulseBaseUrl, headers: pulseHeaders },
-  };
-  const route = routes[target];
-  if (!route) {
-    response.status(400).json({ error: 'targetService must be edge or pulse' });
+  const policy = evaluateRelayPolicy({
+    enabled: process.env.TANDEM_RELAY_ENABLED,
+    expectedSecret: process.env.TANDEM_RELAY_SECRET,
+    providedSecret: request.get('X-Tandem-Relay-Secret'),
+    targetService: body.targetService,
+    target_service: body.target_service,
+    endpoint: body.endpoint,
+    event: body.event || body,
+  });
+  if (!policy.allowed) {
+    response.status(policy.status).json({ error: policy.error });
     return;
   }
-  const relay = await postJson(route.baseUrl, endpoint, event, route.headers || {});
+  const event = body.event || body;
+  const pulseHeaders = pulseEdgeHeaders();
+  if (policy.target === 'pulse' && !pulseHeaders) {
+    response.status(503).json({ error: 'Pulse relay requires PULSE_EDGE_API_KEY on the Tandem server.' });
+    return;
+  }
+  const routes: Record<string, { baseUrl: string; headers?: HeadersInit }> = {
+    edge: { baseUrl: config.edgeBaseUrl },
+    pulse: { baseUrl: config.pulseBaseUrl, headers: pulseHeaders || undefined },
+  };
+  const route = routes[policy.target];
+  const relay = await postJson(route.baseUrl, policy.endpoint, event, route.headers || {});
   publishEvent({
     event_type: 'tandem.relay.attempted',
     source: 'tandem-suite',
-    target,
-    payload: { endpoint, relay },
+    target: policy.target,
+    payload: { endpoint: policy.endpoint, relay },
   });
   response.json({ relay });
 });
@@ -515,6 +544,6 @@ if (fs.existsSync(distIndex)) {
   });
 }
 
-app.listen(port, () => {
-  process.stdout.write(`Tandem Suite listening on http://127.0.0.1:${port}\n`);
+app.listen(port, host, () => {
+  process.stdout.write(`Tandem Suite listening on http://${host}:${port}\n`);
 });

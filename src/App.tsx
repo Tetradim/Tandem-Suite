@@ -24,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { loadSuiteSnapshot } from './api';
+import { normalizeExecutionLifecycle } from './botLifecycle';
 import type {
   AnyPayload,
   EdgeDecisionFeed,
@@ -965,6 +966,7 @@ function TradeState({
   const entry = entryFromPosition(position);
   const quantity = positionQuantity(position);
   const agreement = priceAgreement(position, edgePosition, decision);
+  const lifecycle = normalizeExecutionLifecycle(lastHandoff);
 
   return (
     <div className="trade-state">
@@ -984,7 +986,7 @@ function TradeState({
 
         <div className="timeline">
           <TimelineItem icon={<Activity size={14} />} title="Edge Signal" note={decision ? `Latest decision: ${String(decision.decision ?? decision.action ?? 'recorded')}` : 'No Edge decision feed entry available.'} tone={decision ? 'good' : 'warn'} />
-          <TimelineItem icon={<ArrowRightLeft size={14} />} title="Handoff" note={lastHandoff ? `Last handoff status: ${String(lastHandoff.handoff_status ?? lastHandoff.status ?? 'recorded')}` : 'No last_handoff returned by Edge automation.'} tone={lastHandoff ? 'good' : 'warn'} />
+          <TimelineItem icon={<ArrowRightLeft size={14} />} title={lifecycle.title} note={lifecycle.note} tone={lifecycle.tone} />
           <TimelineItem icon={<Bot size={14} />} title="Pulse Position" note={`${formatNumber(quantity)} units at ${formatMoney(entry)}`} tone="good" />
           <TimelineItem icon={<ShieldCheck size={14} />} title="Protection" note={position.trailing_enabled ? `Trailing stop active at ${formatPct(position.trailing_percent)}` : 'No trailing stop flag reported for this position.'} tone={position.trailing_enabled ? 'good' : 'warn'} />
         </div>
@@ -995,6 +997,7 @@ function TradeState({
         <KeyValue label="Average entry" value={formatMoney(entry)} />
         <KeyValue label="Current price" value={formatMoney(price)} />
         <KeyValue label="Agreement" value={agreement.label} tone={agreement.tone} />
+        <KeyValue label="Lifecycle" value={`${lifecycle.owner}: ${lifecycle.phase}`} tone={lifecycle.tone} />
         <KeyValue label="Trailing stop" value={position.trailing_enabled ? 'Active' : 'Not reported'} tone={position.trailing_enabled ? 'good' : 'warn'} />
       </div>
     </div>

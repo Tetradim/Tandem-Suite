@@ -4,7 +4,7 @@ Unified operator console for Sentinel Edge and Sentinel Pulse.
 
 Tandem Suite keeps the Sentinel services separate and visible. Edge remains the analysis, readiness, signal, and risk-decision service. Pulse remains the broker-facing execution service. Tandem runs a small server-side connector, reads both services, normalizes their status, and presents one focused operations dashboard.
 
-Tandem is intentionally read-only in its current scope. It does not place broker orders, does not send handoff commands, and does not expose the Pulse Edge API key to browser JavaScript.
+Tandem is intentionally read-only in its current scope. It does not place broker orders, does not send handoff commands, and does not expose the Pulse Edge API key to browser JavaScript. The optional server-side bus relay is disabled by default and only allows observer event types on exact `/api/bus/events` relay when explicitly enabled; observer events carrying structured execution or control directives are rejected.
 
 ## Current Feature Map
 
@@ -53,6 +53,7 @@ The UI is intentionally built from real service responses. If Edge, Pulse, or th
 
 - Tandem is a visibility and coordination surface.
 - Current actions are read-only.
+- Observer bus ingress and relay accept free-text signal observations, but reject structured control fields such as order side/quantity, risk settings, trailing stops, bot start/stop commands, and kill-switch directives.
 - Broker-affecting controls should stay in Edge or Pulse until Tandem has explicit confirmation, audit logging, role gating, and owner-service contracts.
 - `PULSE_EDGE_API_KEY` is consumed only by `server/index.ts`.
 - Do not expose broker-capable Pulse endpoints directly from public browser routes.
@@ -73,8 +74,11 @@ Environment variables:
 | `EDGE_API_URL` | `http://localhost:8000` | Sentinel Edge backend URL. |
 | `PULSE_API_URL` | `http://localhost:8001` | Sentinel Pulse backend URL. |
 | `PULSE_EDGE_API_KEY` | unset | API key Pulse expects for `/api/edge/*`; stays on Tandem server. |
+| `TANDEM_RELAY_ENABLED` | unset / false | Enables the narrow observer bus-event relay only; arbitrary POST relay, Pulse handoff paths, and execution-shaped event types stay blocked. |
+| `TANDEM_RELAY_SECRET` | unset | Required when `TANDEM_RELAY_ENABLED=true`; clients must send the same value in `X-Tandem-Relay-Secret`. |
 | `REFRESH_MS` | `5000` | Dashboard refresh interval in milliseconds. |
 | `PORT` | `3005` in single-port production, `8005` for the dev connector | Tandem server port. |
+| `HOST` | `127.0.0.1` | Tandem server bind host. Set only when deliberately exposing the dashboard/API connector beyond the local machine. |
 
 Launcher flags can override Edge/Pulse URLs and Pulse key for local sessions:
 
@@ -99,7 +103,7 @@ http://localhost:3005
 The local dev command starts:
 
 - Tandem API connector at `http://127.0.0.1:8005`
-- Vite UI at `http://localhost:3005`, proxying `/api` to the connector
+- Vite UI at `http://127.0.0.1:3005`, proxying `/api` to the connector
 
 ## Windows Launcher
 
@@ -214,12 +218,27 @@ Snapshot source calls:
 ## Verification
 
 ```powershell
+npm test
 npm run build
 .\Launch-Sentinel-Tandem.ps1 -SmokeTest
 git diff --check
 ```
 
 Use the Simulation Engine mode for a local end-to-end dashboard check without broker access.
+
+### Live-Money Readiness Status - 2026-06-24
+
+Current status: operational read-only dashboard for paper burn-in monitoring; not an execution control surface.
+
+Latest local verification:
+- Server/UI tests: `npm test` -> 22 passed.
+- Runtime snapshot saw Pulse health OK, Pulse Edge API OK, Alpaca connected, VPG present after the Edge-to-Pulse drill, and Pulse reconciliation breaks at `0`.
+- Tandem keeps Pulse service-auth calls server-side and does not expose the Pulse Edge API key to browser JavaScript.
+
+Open gates before live-money use:
+- Add a read-only readiness evidence panel fed by Pulse burn-in records.
+- Keep broker-affecting actions out of Tandem until role-gated confirmation, audit records, and owner-service contracts are implemented.
+- Retain multi-session snapshots and incident evidence for operator signoff.
 
 ## Repository Layout
 
