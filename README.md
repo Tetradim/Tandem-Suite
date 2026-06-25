@@ -105,6 +105,21 @@ The local dev command starts:
 - Tandem API connector at `http://127.0.0.1:8005`
 - Vite UI at `http://127.0.0.1:3005`, proxying `/api` to the connector
 
+## Windows Beta Installer
+
+For non-technical beta testers, download and run `SentinelTandem-Setup-<version>.exe` from the Windows release artifact.
+
+After installation, double-click **Sentinel Tandem Suite** from the Desktop or Start Menu. The installed launcher downloads missing runtime dependencies on first launch, including the Microsoft Visual C++ Runtime when Windows does not already have it. The installed beta build includes its own Node runtime, production dependencies, Tandem server, and built dashboard.
+
+Installed beta testers do not need to install Node.js, npm, or Vite. If startup fails, send a screenshot of the launcher window and the Desktop log file named `Sentinel-Tandem-Suite.log`.
+
+Default installed URLs:
+
+| Service | URL |
+| --- | --- |
+| Tandem dashboard | `http://127.0.0.1:3005` |
+| Snapshot API | `http://127.0.0.1:3005/api/tandem/snapshot` |
+
 ## Windows Launcher
 
 Double-click `Launch-Sentinel-Tandem.bat`, or run:

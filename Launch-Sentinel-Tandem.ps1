@@ -42,6 +42,12 @@ $CancelKeyPressHandler = $null
 $LauncherWatchdogProcess = $null
 $LauncherWatchdogStopFile = $null
 $LauncherWatchdogScriptFile = $null
+$VcRedistUrl = "https://aka.ms/vc14/vc_redist.x64.exe"
+$DependencyRoot = if ($env:LOCALAPPDATA) {
+    Join-Path $env:LOCALAPPDATA "Sentinel Tandem Suite\dependencies"
+} else {
+    Join-Path $ProjectRoot ".dependencies"
+}
 
 function Write-Status {
     param([string]$Message, [string]$Level = "INFO")
@@ -133,6 +139,59 @@ function Test-TandemUi {
     }
 }
 
+function Test-VcRuntimeInstalled {
+    $keys = @(
+        "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64"
+    )
+
+    foreach ($key in $keys) {
+        try {
+            $runtime = Get-ItemProperty -Path $key -ErrorAction SilentlyContinue
+            if ($runtime -and $runtime.Installed -eq 1) { return $true }
+        } catch {
+        }
+    }
+    return $false
+}
+
+function Invoke-DependencyDownload {
+    param(
+        [string]$Url,
+        [string]$OutFile,
+        [string]$Label
+    )
+
+    New-Item -ItemType Directory -Path (Split-Path -Parent $OutFile) -Force | Out-Null
+    if (Test-Path -LiteralPath $OutFile) {
+        Write-Status "$Label already downloaded"
+        return $OutFile
+    }
+
+    Write-Status "Downloading $Label"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+    } catch {
+    }
+    Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 180
+    return $OutFile
+}
+
+function Ensure-InstalledRuntimeDependencies {
+    if (Test-VcRuntimeInstalled) {
+        Write-Status "Microsoft Visual C++ Runtime is installed" "OK"
+        return
+    }
+
+    Write-Status "Microsoft Visual C++ Runtime was not found; installing it automatically" "WARN"
+    $installer = Join-Path $DependencyRoot "vc_redist.x64.exe"
+    Invoke-DependencyDownload -Url $VcRedistUrl -OutFile $installer -Label "Microsoft Visual C++ Runtime" | Out-Null
+    $process = Start-Process -FilePath $installer -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
+    if (-not (@(0, 3010, 1638) -contains $process.ExitCode)) {
+        Write-Status "Microsoft Visual C++ Runtime installer exited with code $($process.ExitCode). Sentinel Tandem Suite will continue and report any startup error." "WARN"
+    }
+}
+
 function Find-CommandPath {
     param([string[]]$Names)
     foreach ($name in $Names) {
@@ -168,6 +227,61 @@ function Get-DotEnvValue {
         }
     }
     return ""
+}
+
+function Resolve-TandemConfig {
+    param(
+        [string]$Root,
+        [string]$RequestedEdgeApiUrl,
+        [string]$RequestedPulseApiUrl,
+        [string]$RequestedPulseEdgeApiKey
+    )
+
+    $envFile = Join-Path $Root ".env"
+    $localEnvFile = Join-Path $Root ".env.local"
+
+    $resolvedEdgeApiUrl = $RequestedEdgeApiUrl
+    if (-not $resolvedEdgeApiUrl) { $resolvedEdgeApiUrl = $env:EDGE_API_URL }
+    if (-not $resolvedEdgeApiUrl) { $resolvedEdgeApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "EDGE_API_URL" }
+    if (-not $resolvedEdgeApiUrl) { $resolvedEdgeApiUrl = Get-DotEnvValue -Path $envFile -Name "EDGE_API_URL" }
+    if (-not $resolvedEdgeApiUrl) { $resolvedEdgeApiUrl = "http://localhost:8000" }
+
+    $resolvedPulseApiUrl = $RequestedPulseApiUrl
+    if (-not $resolvedPulseApiUrl) { $resolvedPulseApiUrl = $env:PULSE_API_URL }
+    if (-not $resolvedPulseApiUrl) { $resolvedPulseApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_API_URL" }
+    if (-not $resolvedPulseApiUrl) { $resolvedPulseApiUrl = Get-DotEnvValue -Path $envFile -Name "PULSE_API_URL" }
+    if (-not $resolvedPulseApiUrl) { $resolvedPulseApiUrl = "http://localhost:8001" }
+
+    $resolvedPulseEdgeApiKey = $RequestedPulseEdgeApiKey
+    if (-not $resolvedPulseEdgeApiKey) { $resolvedPulseEdgeApiKey = $env:PULSE_EDGE_API_KEY }
+    if (-not $resolvedPulseEdgeApiKey) { $resolvedPulseEdgeApiKey = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_EDGE_API_KEY" }
+    if (-not $resolvedPulseEdgeApiKey) { $resolvedPulseEdgeApiKey = Get-DotEnvValue -Path $envFile -Name "PULSE_EDGE_API_KEY" }
+
+    return [pscustomobject]@{
+        EdgeApiUrl = $resolvedEdgeApiUrl
+        PulseApiUrl = $resolvedPulseApiUrl
+        PulseEdgeApiKey = $resolvedPulseEdgeApiKey
+    }
+}
+
+function Apply-TandemConfig {
+    param(
+        [object]$Config,
+        [int]$RefreshMsValue
+    )
+
+    $env:EDGE_API_URL = $Config.EdgeApiUrl
+    $env:PULSE_API_URL = $Config.PulseApiUrl
+    $env:PULSE_EDGE_API_KEY = $Config.PulseEdgeApiKey
+    $env:REFRESH_MS = "$RefreshMsValue"
+
+    Write-Status "Edge API: $($Config.EdgeApiUrl)"
+    Write-Status "Pulse API: $($Config.PulseApiUrl)"
+    if ($Config.PulseEdgeApiKey) {
+        Write-Status "Pulse Edge API key: configured" "OK"
+    } else {
+        Write-Status "Pulse Edge API key is not configured; protected Pulse Edge endpoints will report unavailable." "WARN"
+    }
 }
 
 function Find-BrowserExecutable {
@@ -316,6 +430,40 @@ function Start-OwnedProcess {
     $process = Start-Process @startParams
     $OwnedProcesses.Add($process)
     return $process
+}
+
+function Start-InstalledTandemSuite {
+    param(
+        [string]$BundledNode,
+        [string]$ServerEntry,
+        [int]$PortToUse
+    )
+
+    Ensure-InstalledRuntimeDependencies
+    $env:PORT = "$PortToUse"
+    $env:NODE_ENV = "production"
+
+    if (Test-PortOpen -Port $PortToUse) {
+        if (-not (Test-TandemSuite -Port $PortToUse)) {
+            throw "Port $PortToUse is already in use by another service. Stop that service or launch Tandem with -Port <free port>."
+        }
+        Stop-PortOwnerProcess -Port $PortToUse -Label "Sentinel Tandem Suite"
+    }
+
+    if (-not (Test-PortOpen -Port $PortToUse)) {
+        Write-Status "Starting installed Sentinel Tandem Suite on port $PortToUse"
+        Start-OwnedProcess -FilePath $BundledNode -ArgumentList @($ServerEntry, "--port", "$PortToUse") -WorkingDirectory $ProjectRoot | Out-Null
+        if (-not (Wait-Port -Port $PortToUse -Seconds 30)) {
+            throw "Sentinel Tandem Suite did not open port $PortToUse. Check $LogFile."
+        }
+        if (-not (Wait-TandemSuite -Port $PortToUse -Seconds 45)) {
+            throw "Port $PortToUse opened, but it is not responding as Sentinel Tandem Suite. Check $LogFile."
+        }
+        if (-not (Test-TandemUi -Port $PortToUse)) {
+            throw "Sentinel Tandem Suite API is ready, but the dashboard UI did not respond as expected."
+        }
+        Write-Status "Sentinel Tandem Suite is ready" "OK"
+    }
 }
 
 function Stop-ProcessTree {
@@ -548,6 +696,10 @@ function Register-LauncherShutdownHandlers {
     }
 }
 
+function Start-SourceTandemSuite {
+    Write-Status "Starting Sentinel Tandem Suite - Local Source"
+}
+
 if ($SmokeTest) {
     Write-Status "Running launcher smoke test"
     $quotedArgs = Join-ProcessArguments -Arguments @("--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelTandem-Browser-1234")
@@ -578,6 +730,48 @@ try {
     Write-Status "Project root: $ProjectRoot"
     Write-Status "Launcher log: $LogFile"
 
+    $resolvedConfig = Resolve-TandemConfig `
+        -Root $ProjectRoot `
+        -RequestedEdgeApiUrl $EdgeApiUrl `
+        -RequestedPulseApiUrl $PulseApiUrl `
+        -RequestedPulseEdgeApiKey $PulseEdgeApiKey
+    Apply-TandemConfig -Config $resolvedConfig -RefreshMsValue $RefreshMs
+
+    $bundledNode = Join-Path $ProjectRoot "runtime\node.exe"
+    $installedServerEntry = Join-Path $ProjectRoot "dist-server\server\index.js"
+    $installedUiEntry = Join-Path $ProjectRoot "dist\index.html"
+    if ((Test-Path -LiteralPath $bundledNode) -and (Test-Path -LiteralPath $installedServerEntry) -and (Test-Path -LiteralPath $installedUiEntry)) {
+        Write-Host "  Sentinel Tandem Suite - Installed App" -ForegroundColor Cyan
+        $url = "http://127.0.0.1:$Port"
+        Start-InstalledTandemSuite -BundledNode $bundledNode -ServerEntry $installedServerEntry -PortToUse $Port
+
+        if (-not $NoBrowser) {
+            $BrowserProcess = Start-BrowserWindow -Url $url
+        }
+        Start-LauncherShutdownWatchdog
+
+        Write-Host ""
+        Write-Host "Ready: $url" -ForegroundColor Green
+        Write-Host "Close this window or press Ctrl+C to stop Tandem Suite." -ForegroundColor Gray
+        Write-Host ""
+
+        while ($true) {
+            foreach ($process in @($OwnedProcesses)) {
+                if ($process.HasExited) {
+                    throw "Process $($process.Id) exited unexpectedly."
+                }
+            }
+            if (Test-BrowserWindowClosed) {
+                Write-Status "Browser window closed; shutting down Sentinel Tandem Suite" "OK"
+                break
+            }
+            Start-Sleep -Seconds 1
+        }
+        return
+    }
+
+    Start-SourceTandemSuite
+
     $node = Find-Node
     if (-not $node) { throw "Node.js was not found. Install Node.js 20+ and rerun the launcher." }
     $npm = Find-Npm
@@ -599,34 +793,6 @@ try {
         Write-Status "Building Tandem Suite"
         & $npm run build
         if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE." }
-    }
-
-    $envFile = Join-Path $ProjectRoot ".env"
-    $localEnvFile = Join-Path $ProjectRoot ".env.local"
-
-    if (-not $EdgeApiUrl) { $EdgeApiUrl = $env:EDGE_API_URL }
-    if (-not $EdgeApiUrl) { $EdgeApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "EDGE_API_URL" }
-    if (-not $EdgeApiUrl) { $EdgeApiUrl = Get-DotEnvValue -Path $envFile -Name "EDGE_API_URL" }
-    if (-not $EdgeApiUrl) { $EdgeApiUrl = "http://localhost:8000" }
-    if (-not $PulseApiUrl) { $PulseApiUrl = $env:PULSE_API_URL }
-    if (-not $PulseApiUrl) { $PulseApiUrl = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_API_URL" }
-    if (-not $PulseApiUrl) { $PulseApiUrl = Get-DotEnvValue -Path $envFile -Name "PULSE_API_URL" }
-    if (-not $PulseApiUrl) { $PulseApiUrl = "http://localhost:8001" }
-    if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = $env:PULSE_EDGE_API_KEY }
-    if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = Get-DotEnvValue -Path $localEnvFile -Name "PULSE_EDGE_API_KEY" }
-    if (-not $PulseEdgeApiKey) { $PulseEdgeApiKey = Get-DotEnvValue -Path $envFile -Name "PULSE_EDGE_API_KEY" }
-
-    $env:EDGE_API_URL = $EdgeApiUrl
-    $env:PULSE_API_URL = $PulseApiUrl
-    $env:PULSE_EDGE_API_KEY = $PulseEdgeApiKey
-    $env:REFRESH_MS = "$RefreshMs"
-
-    Write-Status "Edge API: $EdgeApiUrl"
-    Write-Status "Pulse API: $PulseApiUrl"
-    if ($PulseEdgeApiKey) {
-        Write-Status "Pulse Edge API key: configured" "OK"
-    } else {
-        Write-Status "Pulse Edge API key is not configured; protected Pulse Edge endpoints will report unavailable." "WARN"
     }
 
     if (-not $SinglePort) {

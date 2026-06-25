@@ -1,0 +1,186 @@
+name: Build Sentinel Tandem Suite Windows Installer
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Custom version
+        required: false
+        default: ''
+
+env:
+  VERSION: ${{ github.event.inputs.version || '1.0.0-beta' }}
+  NODE_VERSION: '20'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          $version = "${{ github.ref }}" -replace 'refs/tags/v', ''
+          echo "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build app
+        run: npm run build
+
+      - name: Create installer payload
+        run: |
+          $package = "release\SentinelTandem"
+          Remove-Item release -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $package -Force | Out-Null
+          New-Item -ItemType Directory -Path "$package\runtime" -Force | Out-Null
+          Copy-Item "dist-server" -Destination $package -Recurse -Force
+          Copy-Item "dist" -Destination $package -Recurse -Force
+          Copy-Item "package.json" -Destination $package -Force
+          Copy-Item "package-lock.json" -Destination $package -Force
+          Copy-Item "Launch-Sentinel-Tandem.bat" -Destination $package -Force
+          Copy-Item "Launch-Sentinel-Tandem.ps1" -Destination $package -Force
+          Copy-Item ".env.example" -Destination $package -Force -ErrorAction SilentlyContinue
+          $nodePath = (Get-Command node.exe).Source
+          Copy-Item $nodePath -Destination "$package\runtime\node.exe" -Force
+          Push-Location $package
+          npm ci --omit=dev --ignore-scripts
+          Pop-Location
+
+      - name: Verify package
+        run: |
+          if (!(Test-Path "release\SentinelTandem\runtime\node.exe")) {
+            Write-Host "ERROR: bundled runtime\node.exe not found"
+            exit 1
+          }
+          if (!(Test-Path "release\SentinelTandem\dist-server\server\index.js")) {
+            Write-Host "ERROR: dist-server\server\index.js not found"
+            exit 1
+          }
+          if (!(Test-Path "release\SentinelTandem\dist\index.html")) {
+            Write-Host "ERROR: dist\index.html not found"
+            exit 1
+          }
+          if (!(Test-Path "release\SentinelTandem\node_modules\express")) {
+            Write-Host "ERROR: production node_modules were not installed"
+            exit 1
+          }
+          if (!(Test-Path "release\SentinelTandem\Launch-Sentinel-Tandem.bat")) {
+            Write-Host "ERROR: Launch-Sentinel-Tandem.bat not found"
+            exit 1
+          }
+          if (!(Test-Path "release\SentinelTandem\Launch-Sentinel-Tandem.ps1")) {
+            Write-Host "ERROR: Launch-Sentinel-Tandem.ps1 not found"
+            exit 1
+          }
+
+      - name: Create Inno Setup script
+        run: |
+          $iss = @"
+          #define MyAppName "Sentinel Tandem Suite"
+          #define MyAppVersion "${{ env.VERSION }}"
+          #define MyAppPublisher "Tetradim / SignalForge Lab"
+          #define MyAppURL "https://github.com/Tetradim/Tandem-Suite"
+
+          [Setup]
+          AppId={{2D144533-4C9E-48C0-8F86-281CC0DD2C61}
+          AppName={#MyAppName}
+          AppVersion={#MyAppVersion}
+          AppVerName={#MyAppName} {#MyAppVersion}
+          AppPublisher={#MyAppPublisher}
+          AppPublisherURL={#MyAppURL}
+          AppSupportURL={#MyAppURL}/issues
+          AppUpdatesURL={#MyAppURL}/releases
+          DefaultDirName={autopf}\{#MyAppName}
+          DefaultGroupName={#MyAppName}
+          OutputDir=installer-dist
+          OutputBaseFilename=SentinelTandem-Setup-{#MyAppVersion}
+          UninstallDisplayName={#MyAppName}
+          UninstallDisplayIcon={app}\Launch-Sentinel-Tandem.bat
+          Compression=lzma2
+          SolidCompression=yes
+          WizardStyle=modern
+          MinVersion=10.0.18362
+          PrivilegesRequired=admin
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+
+          [Languages]
+          Name: "english"; MessagesFile: "compiler:Default.isl"
+
+          [Tasks]
+          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
+          Name: "launchapp"; Description: "Launch Sentinel Tandem Suite after install"; GroupDescription: "Startup"; Flags: checkedonce
+
+          [Files]
+          Source: "release\SentinelTandem\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{group}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Tandem.bat"; WorkingDir: "{app}"
+          Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
+          Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Tandem.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+
+          [Run]
+          Filename: "{app}\Launch-Sentinel-Tandem.bat"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec; Tasks: launchapp; WorkingDir: "{app}"
+
+          [UninstallDelete]
+          Type: filesandordirs; Name: "{app}"
+          Type: files; Name: "{userdesktop}\Sentinel-Tandem-Suite.log"
+          "@
+          $iss | Out-File -Encoding ASCII setup.iss
+
+      - name: Build installer
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: setup.iss
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: SentinelTandem-Setup-${{ env.VERSION }}
+          path: installer-dist/SentinelTandem-Setup*.exe
+          if-no-files-found: error
+          retention-days: 90
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+
+    steps:
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          pattern: SentinelTandem-Setup-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: artifacts/SentinelTandem-Setup*.exe
+          draft: false
+          prerelease: ${{ contains(github.ref, 'beta') }}
+          generate_release_notes: true
