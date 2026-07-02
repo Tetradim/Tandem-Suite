@@ -47,7 +47,7 @@ export function buildEvent(input: EventInput): BotEvent {
     schema_version: EVENT_SCHEMA_VERSION,
     event_id: randomUUID(),
     event_type: eventType,
-    source: String(input.source || 'tandem-suite'),
+    source: String(input.source || 'sentinel-core'),
     target,
     created_at: nowUtc(),
     payload: asRecord(input.payload),

@@ -17,9 +17,9 @@ async function requestJson<T>(path: string): Promise<T> {
 }
 
 export function loadSuiteConfig() {
-  return requestJson<SuiteConfig>('/api/tandem/config');
+  return requestJson<SuiteConfig>('/api/sentinel-core/config');
 }
 
 export function loadSuiteSnapshot() {
-  return requestJson<SuiteSnapshot>('/api/tandem/snapshot');
+  return requestJson<SuiteSnapshot>('/api/sentinel-core/snapshot');
 }

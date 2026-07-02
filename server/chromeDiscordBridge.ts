@@ -43,7 +43,7 @@ export type ChromeBridgeEventInput = EventInput & {
   payload: Record<string, unknown>;
 };
 
-const DEFAULT_TARGET = 'tandem-suite';
+const DEFAULT_TARGET = 'sentinel-core';
 const LOCAL_BRIDGE_ADDRESSES = new Set(['127.0.0.1', '::1', 'localhost', '::ffff:127.0.0.1']);
 
 function text(value: unknown, fallback = '') {

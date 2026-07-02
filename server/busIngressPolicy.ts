@@ -21,20 +21,20 @@ export function evaluateBusIngressPolicy(input: {
     return {
       allowed: false,
       status: 403,
-      error: 'Tandem bus ingress is disabled; set TANDEM_BUS_INGRESS_ENABLED=true to allow observer telemetry writes.',
+      error: 'Sentinel Core bus ingress is disabled; set SENTINEL_CORE_BUS_INGRESS_ENABLED=true to allow observer telemetry writes.',
     };
   }
 
   const expectedSecret = String(input.expectedSecret || '').trim();
   if (!expectedSecret) {
-    return { allowed: false, status: 503, error: 'Tandem bus ingress secret is not configured.' };
+    return { allowed: false, status: 503, error: 'Sentinel Core bus ingress secret is not configured.' };
   }
 
   const providedSecret = String(input.providedSecret || '').trim();
   const expected = Buffer.from(expectedSecret, 'utf8');
   const provided = Buffer.from(providedSecret, 'utf8');
   if (!providedSecret || expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
-    return { allowed: false, status: 401, error: 'Tandem bus ingress secret is missing or invalid.' };
+    return { allowed: false, status: 401, error: 'Sentinel Core bus ingress secret is missing or invalid.' };
   }
 
   const event = input.event && typeof input.event === 'object' && !Array.isArray(input.event) ? input.event as Record<string, unknown> : {};

@@ -26,19 +26,19 @@ export function evaluateRelayPolicy(input: {
     return {
       allowed: false,
       status: 403,
-      error: 'Tandem relay is disabled; set TANDEM_RELAY_ENABLED=true to allow safe bus-event relay.',
+      error: 'Sentinel Core relay is disabled; set SENTINEL_CORE_RELAY_ENABLED=true to allow safe bus-event relay.',
     };
   }
 
   const expectedSecret = String(input.expectedSecret || '').trim();
   if (!expectedSecret) {
-    return { allowed: false, status: 503, error: 'Tandem relay secret is not configured.' };
+    return { allowed: false, status: 503, error: 'Sentinel Core relay secret is not configured.' };
   }
   const providedSecret = String(input.providedSecret || '').trim();
   const expected = Buffer.from(expectedSecret, 'utf8');
   const provided = Buffer.from(providedSecret, 'utf8');
   if (!providedSecret || expected.length !== provided.length || !timingSafeEqual(expected, provided)) {
-    return { allowed: false, status: 401, error: 'Tandem relay secret is missing or invalid.' };
+    return { allowed: false, status: 401, error: 'Sentinel Core relay secret is missing or invalid.' };
   }
 
   const target = String(input.targetService || input.target_service || '').trim().toLowerCase();

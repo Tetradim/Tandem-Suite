@@ -75,9 +75,9 @@ test('bus ingress blocks observer telemetry carrying structured execution contro
   assert.match(decision.error, /execution|control|directive/i);
 });
 
-test('tandem direct bus route uses the ingress policy before publish', () => {
+test('sentinel-core direct bus route uses the ingress policy before publish', () => {
   const source = fs.readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
 
   assert.match(source, /evaluateBusIngressPolicy/);
-  assert.match(source, /X-Tandem-Bus-Secret/);
+  assert.match(source, /X-Sentinel-Core-Bus-Secret/);
 });

@@ -132,14 +132,14 @@ test('relay policy blocks observer events carrying structured execution directiv
   assert.match(decision.error, /execution|control|directive/i);
 });
 
-test('tandem pulse relay route is wired to server-side pulse auth headers', () => {
+test('sentinel-core pulse relay route is wired to server-side pulse auth headers', () => {
   const source = fs.readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
 
   assert.match(source, /pulseEdgeHeaders\(\)/);
   assert.match(source, /pulse relay requires PULSE_EDGE_API_KEY/i);
 });
 
-test('tandem snapshot reads Pulse operational data through Edge-authenticated routes', () => {
+test('sentinel-core snapshot reads Pulse operational data through Edge-authenticated routes', () => {
   const source = fs.readFileSync(new URL('./index.ts', import.meta.url), 'utf8');
 
   for (const endpoint of [
@@ -162,7 +162,6 @@ test('tandem snapshot reads Pulse operational data through Edge-authenticated ro
     '/api/edge/risk/limits',
     '/api/edge/reconciliation/summary',
     '/api/edge/portfolio/stats',
-    '/api/edge/orders',
     '/api/edge/orders/stats',
     '/api/edge/analytics/portfolio',
     '/api/edge/ops/services',
@@ -170,6 +169,7 @@ test('tandem snapshot reads Pulse operational data through Edge-authenticated ro
   ]) {
     assert.match(source, new RegExp(`pulseEdge<[^>]+>\\('${endpoint.replace(/\//g, '\\/')}'\\)`));
   }
+  assert.match(source, /pulseEdgeSlow<AnyPayload>\('\/api\/edge\/orders'\)/);
 
   for (const endpoint of [
     '/api/bot/status',

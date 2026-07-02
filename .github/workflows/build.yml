@@ -1,4 +1,4 @@
-name: Build Sentinel Tandem Suite Windows Installer
+name: Build Sentinel Core Windows Installer
 
 on:
   push:
@@ -52,7 +52,7 @@ jobs:
 
       - name: Create installer payload
         run: |
-          $package = "release\SentinelTandem"
+          $package = "release\SentinelCore"
           Remove-Item release -Recurse -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path $package -Force | Out-Null
           New-Item -ItemType Directory -Path "$package\runtime" -Force | Out-Null
@@ -60,8 +60,8 @@ jobs:
           Copy-Item "dist" -Destination $package -Recurse -Force
           Copy-Item "package.json" -Destination $package -Force
           Copy-Item "package-lock.json" -Destination $package -Force
-          Copy-Item "Launch-Sentinel-Tandem.bat" -Destination $package -Force
-          Copy-Item "Launch-Sentinel-Tandem.ps1" -Destination $package -Force
+          Copy-Item "Launch-Sentinel-Core.bat" -Destination $package -Force
+          Copy-Item "Launch-Sentinel-Core.ps1" -Destination $package -Force
           Copy-Item ".env.example" -Destination $package -Force -ErrorAction SilentlyContinue
           $nodePath = (Get-Command node.exe).Source
           Copy-Item $nodePath -Destination "$package\runtime\node.exe" -Force
@@ -71,38 +71,38 @@ jobs:
 
       - name: Verify package
         run: |
-          if (!(Test-Path "release\SentinelTandem\runtime\node.exe")) {
+          if (!(Test-Path "release\SentinelCore\runtime\node.exe")) {
             Write-Host "ERROR: bundled runtime\node.exe not found"
             exit 1
           }
-          if (!(Test-Path "release\SentinelTandem\dist-server\server\index.js")) {
+          if (!(Test-Path "release\SentinelCore\dist-server\server\index.js")) {
             Write-Host "ERROR: dist-server\server\index.js not found"
             exit 1
           }
-          if (!(Test-Path "release\SentinelTandem\dist\index.html")) {
+          if (!(Test-Path "release\SentinelCore\dist\index.html")) {
             Write-Host "ERROR: dist\index.html not found"
             exit 1
           }
-          if (!(Test-Path "release\SentinelTandem\node_modules\express")) {
+          if (!(Test-Path "release\SentinelCore\node_modules\express")) {
             Write-Host "ERROR: production node_modules were not installed"
             exit 1
           }
-          if (!(Test-Path "release\SentinelTandem\Launch-Sentinel-Tandem.bat")) {
-            Write-Host "ERROR: Launch-Sentinel-Tandem.bat not found"
+          if (!(Test-Path "release\SentinelCore\Launch-Sentinel-Core.bat")) {
+            Write-Host "ERROR: Launch-Sentinel-Core.bat not found"
             exit 1
           }
-          if (!(Test-Path "release\SentinelTandem\Launch-Sentinel-Tandem.ps1")) {
-            Write-Host "ERROR: Launch-Sentinel-Tandem.ps1 not found"
+          if (!(Test-Path "release\SentinelCore\Launch-Sentinel-Core.ps1")) {
+            Write-Host "ERROR: Launch-Sentinel-Core.ps1 not found"
             exit 1
           }
 
       - name: Create Inno Setup script
         run: |
           $iss = @"
-          #define MyAppName "Sentinel Tandem Suite"
+          #define MyAppName "Sentinel Core"
           #define MyAppVersion "${{ env.VERSION }}"
           #define MyAppPublisher "Tetradim / SignalForge Lab"
-          #define MyAppURL "https://github.com/Tetradim/Tandem-Suite"
+          #define MyAppURL "https://github.com/Tetradim/Sentinel Core-Suite"
 
           [Setup]
           AppId={{2D144533-4C9E-48C0-8F86-281CC0DD2C61}
@@ -116,9 +116,9 @@ jobs:
           DefaultDirName={autopf}\{#MyAppName}
           DefaultGroupName={#MyAppName}
           OutputDir=installer-dist
-          OutputBaseFilename=SentinelTandem-Setup-{#MyAppVersion}
+          OutputBaseFilename=SentinelCore-Setup-{#MyAppVersion}
           UninstallDisplayName={#MyAppName}
-          UninstallDisplayIcon={app}\Launch-Sentinel-Tandem.bat
+          UninstallDisplayIcon={app}\Launch-Sentinel-Core.bat
           Compression=lzma2
           SolidCompression=yes
           WizardStyle=modern
@@ -132,22 +132,22 @@ jobs:
 
           [Tasks]
           Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: checkedonce
-          Name: "launchapp"; Description: "Launch Sentinel Tandem Suite after install"; GroupDescription: "Startup"; Flags: checkedonce
+          Name: "launchapp"; Description: "Launch Sentinel Core after install"; GroupDescription: "Startup"; Flags: checkedonce
 
           [Files]
-          Source: "release\SentinelTandem\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "release\SentinelCore\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
           [Icons]
-          Name: "{group}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Tandem.bat"; WorkingDir: "{app}"
+          Name: "{group}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Core.bat"; WorkingDir: "{app}"
           Name: "{group}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"
-          Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Tandem.bat"; WorkingDir: "{app}"; Tasks: desktopicon
+          Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\Launch-Sentinel-Core.bat"; WorkingDir: "{app}"; Tasks: desktopicon
 
           [Run]
-          Filename: "{app}\Launch-Sentinel-Tandem.bat"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec; Tasks: launchapp; WorkingDir: "{app}"
+          Filename: "{app}\Launch-Sentinel-Core.bat"; Description: "Launch {#MyAppName}"; Flags: nowait postinstall skipifsilent shellexec; Tasks: launchapp; WorkingDir: "{app}"
 
           [UninstallDelete]
           Type: filesandordirs; Name: "{app}"
-          Type: files; Name: "{userdesktop}\Sentinel-Tandem-Suite.log"
+          Type: files; Name: "{userdesktop}\Sentinel-Core.log"
           "@
           $iss | Out-File -Encoding ASCII setup.iss
 
@@ -159,8 +159,8 @@ jobs:
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: SentinelTandem-Setup-${{ env.VERSION }}
-          path: installer-dist/SentinelTandem-Setup*.exe
+          name: SentinelCore-Setup-${{ env.VERSION }}
+          path: installer-dist/SentinelCore-Setup*.exe
           if-no-files-found: error
           retention-days: 90
 
@@ -173,14 +173,14 @@ jobs:
       - name: Download installer
         uses: actions/download-artifact@v4
         with:
-          pattern: SentinelTandem-Setup-*
+          pattern: SentinelCore-Setup-*
           path: artifacts
           merge-multiple: true
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: artifacts/SentinelTandem-Setup*.exe
+          files: artifacts/SentinelCore-Setup*.exe
           draft: false
           prerelease: ${{ contains(github.ref, 'beta') }}
           generate_release_notes: true

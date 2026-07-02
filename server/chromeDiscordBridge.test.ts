@@ -5,12 +5,12 @@ import { buildChromeBridgeHealthEvent, buildChromeBridgeMessageEvent, isLocalBri
 
 test('buildChromeBridgeMessageEvent maps Discord payload to signal.observed bus event', () => {
   const event = buildChromeBridgeMessageEvent({
-    event_id: 'tandem-chrome-1',
+    event_id: 'sentinel-core-chrome-1',
     channel_id: '123',
     channel_name: 'mike-alerts',
     channel_url: 'https://discord.com/channels/1/123',
-    bridge_target_id: 'tandem-suite',
-    bridge_target_name: 'Tandem Suite',
+    bridge_target_id: 'sentinel-core',
+    bridge_target_name: 'Sentinel Core',
     author_name: 'MikeInvesting [MIKE]',
     content: '$SPY\n$744 PUTS\nEXPIRATION 6/22/2026\n$.4 Entry\n@everyone alert',
     observed_at: '2026-06-22T14:23:00+00:00',
@@ -18,9 +18,9 @@ test('buildChromeBridgeMessageEvent maps Discord payload to signal.observed bus 
 
   assert.equal(event.event_type, 'signal.observed');
   assert.equal(event.source, 'chrome-discord-bridge');
-  assert.equal(event.target, 'tandem-suite');
+  assert.equal(event.target, 'sentinel-core');
   assert.equal(event.payload.contract_version, 'chrome.discord.message.v1');
-  assert.equal(event.payload.bridge_target_id, 'tandem-suite');
+  assert.equal(event.payload.bridge_target_id, 'sentinel-core');
   assert.match(String(event.payload.raw_text), /\$SPY/);
 });
 
@@ -30,14 +30,14 @@ test('buildChromeBridgeHealthEvent preserves target metadata', () => {
     bridge_enabled: true,
     channel_id: '123',
     channel_url: 'https://discord.com/channels/1/123',
-    bridge_target_id: 'tandem-suite',
+    bridge_target_id: 'sentinel-core',
     observed_at: '2026-06-22T14:23:30+00:00',
   });
 
   assert.equal(event.event_type, 'bridge.health');
   assert.equal(event.source, 'chrome-discord-bridge');
-  assert.equal(event.target, 'tandem-suite');
-  assert.equal(event.payload.bridge_target_id, 'tandem-suite');
+  assert.equal(event.target, 'sentinel-core');
+  assert.equal(event.payload.bridge_target_id, 'sentinel-core');
   assert.equal(event.payload.healthy, true);
 });
 

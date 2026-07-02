@@ -1,5 +1,5 @@
-# Sentinel Tandem Suite Launcher
-# Starts the Tandem server and opens the operator dashboard.
+# Sentinel Core Launcher
+# Starts the Sentinel Core server and opens the operator dashboard.
 
 param(
     [int]$BackendPort = 8005,
@@ -28,7 +28,7 @@ $DesktopPath = [Environment]::GetFolderPath("Desktop")
 if (-not $DesktopPath) { $DesktopPath = Join-Path $HOME "Desktop" }
 if (-not $LogPath) { $LogPath = $DesktopPath }
 
-$LogFile = Join-Path $LogPath "Sentinel-Tandem-Suite.log"
+$LogFile = Join-Path $LogPath "Sentinel-Core.log"
 $OwnedProcesses = New-Object System.Collections.Generic.List[System.Diagnostics.Process]
 $BrowserProcess = $null
 $BrowserProfileDir = $null
@@ -44,7 +44,7 @@ $LauncherWatchdogStopFile = $null
 $LauncherWatchdogScriptFile = $null
 $VcRedistUrl = "https://aka.ms/vc14/vc_redist.x64.exe"
 $DependencyRoot = if ($env:LOCALAPPDATA) {
-    Join-Path $env:LOCALAPPDATA "Sentinel Tandem Suite\dependencies"
+    Join-Path $env:LOCALAPPDATA "Sentinel Core\dependencies"
 } else {
     Join-Path $ProjectRoot ".dependencies"
 }
@@ -104,10 +104,10 @@ function Wait-Port {
     return $false
 }
 
-function Test-TandemSuite {
+function Test-SentinelCore {
     param([int]$Port)
     try {
-        $snapshot = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/tandem/snapshot" -Method Get -TimeoutSec 5
+        $snapshot = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/api/sentinel-core/snapshot" -Method Get -TimeoutSec 5
         $properties = @($snapshot.PSObject.Properties.Name)
         return (
             $properties -contains "config" -and
@@ -119,21 +119,21 @@ function Test-TandemSuite {
     }
 }
 
-function Wait-TandemSuite {
+function Wait-SentinelCore {
     param([int]$Port, [int]$Seconds = 45)
     $deadline = (Get-Date).AddSeconds($Seconds)
     while ((Get-Date) -lt $deadline) {
-        if (Test-TandemSuite -Port $Port) { return $true }
+        if (Test-SentinelCore -Port $Port) { return $true }
         Start-Sleep -Milliseconds 500
     }
     return $false
 }
 
-function Test-TandemUi {
+function Test-SentinelCoreUi {
     param([int]$Port)
     try {
         $response = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/" -UseBasicParsing -TimeoutSec 5
-        return ($response.StatusCode -eq 200 -and $response.Content -match "Sentinel Tandem Suite")
+        return ($response.StatusCode -eq 200 -and $response.Content -match "Sentinel Core")
     } catch {
         return $false
     }
@@ -188,7 +188,7 @@ function Ensure-InstalledRuntimeDependencies {
     Invoke-DependencyDownload -Url $VcRedistUrl -OutFile $installer -Label "Microsoft Visual C++ Runtime" | Out-Null
     $process = Start-Process -FilePath $installer -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
     if (-not (@(0, 3010, 1638) -contains $process.ExitCode)) {
-        Write-Status "Microsoft Visual C++ Runtime installer exited with code $($process.ExitCode). Sentinel Tandem Suite will continue and report any startup error." "WARN"
+        Write-Status "Microsoft Visual C++ Runtime installer exited with code $($process.ExitCode). Sentinel Core will continue and report any startup error." "WARN"
     }
 }
 
@@ -229,7 +229,7 @@ function Get-DotEnvValue {
     return ""
 }
 
-function Resolve-TandemConfig {
+function Resolve-SentinelCoreConfig {
     param(
         [string]$Root,
         [string]$RequestedEdgeApiUrl,
@@ -264,7 +264,7 @@ function Resolve-TandemConfig {
     }
 }
 
-function Apply-TandemConfig {
+function Apply-SentinelCoreConfig {
     param(
         [object]$Config,
         [int]$RefreshMsValue
@@ -393,7 +393,7 @@ function Start-BrowserWindow {
     $browserExe = Find-BrowserExecutable
     if ($browserExe) {
         Write-Status "Opening dedicated browser window"
-        $script:BrowserProfileDir = Join-Path ([System.IO.Path]::GetTempPath()) "SentinelTandem-Browser-$PID"
+        $script:BrowserProfileDir = Join-Path ([System.IO.Path]::GetTempPath()) "SentinelCore-Browser-$PID"
         $script:BrowserStartedAt = Get-Date
         New-Item -ItemType Directory -Path $script:BrowserProfileDir -Force | Out-Null
         $browserArgs = Join-ProcessArguments -Arguments @("--new-window", "--app=$Url", "--user-data-dir=$script:BrowserProfileDir", "--no-first-run", "--disable-background-mode")
@@ -432,7 +432,7 @@ function Start-OwnedProcess {
     return $process
 }
 
-function Start-InstalledTandemSuite {
+function Start-InstalledSentinelCore {
     param(
         [string]$BundledNode,
         [string]$ServerEntry,
@@ -444,25 +444,25 @@ function Start-InstalledTandemSuite {
     $env:NODE_ENV = "production"
 
     if (Test-PortOpen -Port $PortToUse) {
-        if (-not (Test-TandemSuite -Port $PortToUse)) {
-            throw "Port $PortToUse is already in use by another service. Stop that service or launch Tandem with -Port <free port>."
+        if (-not (Test-SentinelCore -Port $PortToUse)) {
+            throw "Port $PortToUse is already in use by another service. Stop that service or launch Sentinel Core with -Port <free port>."
         }
-        Stop-PortOwnerProcess -Port $PortToUse -Label "Sentinel Tandem Suite"
+        Stop-PortOwnerProcess -Port $PortToUse -Label "Sentinel Core"
     }
 
     if (-not (Test-PortOpen -Port $PortToUse)) {
-        Write-Status "Starting installed Sentinel Tandem Suite on port $PortToUse"
+        Write-Status "Starting installed Sentinel Core on port $PortToUse"
         Start-OwnedProcess -FilePath $BundledNode -ArgumentList @($ServerEntry, "--port", "$PortToUse") -WorkingDirectory $ProjectRoot | Out-Null
         if (-not (Wait-Port -Port $PortToUse -Seconds 30)) {
-            throw "Sentinel Tandem Suite did not open port $PortToUse. Check $LogFile."
+            throw "Sentinel Core did not open port $PortToUse. Check $LogFile."
         }
-        if (-not (Wait-TandemSuite -Port $PortToUse -Seconds 45)) {
-            throw "Port $PortToUse opened, but it is not responding as Sentinel Tandem Suite. Check $LogFile."
+        if (-not (Wait-SentinelCore -Port $PortToUse -Seconds 45)) {
+            throw "Port $PortToUse opened, but it is not responding as Sentinel Core. Check $LogFile."
         }
-        if (-not (Test-TandemUi -Port $PortToUse)) {
-            throw "Sentinel Tandem Suite API is ready, but the dashboard UI did not respond as expected."
+        if (-not (Test-SentinelCoreUi -Port $PortToUse)) {
+            throw "Sentinel Core API is ready, but the dashboard UI did not respond as expected."
         }
-        Write-Status "Sentinel Tandem Suite is ready" "OK"
+        Write-Status "Sentinel Core is ready" "OK"
     }
 }
 
@@ -512,7 +512,7 @@ function Stop-OwnedProcesses {
 function Start-LauncherShutdownWatchdog {
     if ($script:LauncherWatchdogProcess -and -not $script:LauncherWatchdogProcess.HasExited) { return }
 
-    $watchdogName = "SentinelTandem-Watchdog-$PID"
+    $watchdogName = "SentinelCore-Watchdog-$PID"
     $script:LauncherWatchdogStopFile = Join-Path ([System.IO.Path]::GetTempPath()) "$watchdogName.stop"
     $script:LauncherWatchdogScriptFile = Join-Path ([System.IO.Path]::GetTempPath()) "$watchdogName.ps1"
     if (Test-Path $script:LauncherWatchdogStopFile) {
@@ -687,7 +687,7 @@ function Register-LauncherShutdownHandlers {
         $script:CancelKeyPressHandler = [ConsoleCancelEventHandler]{
             param($sender, $eventArgs)
             $eventArgs.Cancel = $true
-            Write-Status "Shutdown requested; closing browser and Tandem server" "WARN"
+            Write-Status "Shutdown requested; closing browser and Sentinel Core server" "WARN"
             Invoke-LauncherCleanup
             exit 0
         }
@@ -696,14 +696,14 @@ function Register-LauncherShutdownHandlers {
     }
 }
 
-function Start-SourceTandemSuite {
-    Write-Status "Starting Sentinel Tandem Suite - Local Source"
+function Start-SourceSentinelCore {
+    Write-Status "Starting Sentinel Core - Local Source"
 }
 
 if ($SmokeTest) {
     Write-Status "Running launcher smoke test"
-    $quotedArgs = Join-ProcessArguments -Arguments @("--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelTandem-Browser-1234")
-    if (-not $quotedArgs.Contains('"--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelTandem-Browser-1234"')) {
+    $quotedArgs = Join-ProcessArguments -Arguments @("--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelCore-Browser-1234")
+    if (-not $quotedArgs.Contains('"--user-data-dir=C:\Users\Lite OS\AppData\Local\Temp\SentinelCore-Browser-1234"')) {
         throw "Browser argument quoting smoke test failed."
     }
     $pathArgs = Join-ProcessArguments -Arguments @("dist-server\server\index.js", "--port", "3005")
@@ -724,26 +724,26 @@ try {
 
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "  Sentinel Tandem Suite" -ForegroundColor Cyan
+    Write-Host "  Sentinel Core" -ForegroundColor Cyan
     Write-Host "========================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Status "Project root: $ProjectRoot"
     Write-Status "Launcher log: $LogFile"
 
-    $resolvedConfig = Resolve-TandemConfig `
+    $resolvedConfig = Resolve-SentinelCoreConfig `
         -Root $ProjectRoot `
         -RequestedEdgeApiUrl $EdgeApiUrl `
         -RequestedPulseApiUrl $PulseApiUrl `
         -RequestedPulseEdgeApiKey $PulseEdgeApiKey
-    Apply-TandemConfig -Config $resolvedConfig -RefreshMsValue $RefreshMs
+    Apply-SentinelCoreConfig -Config $resolvedConfig -RefreshMsValue $RefreshMs
 
     $bundledNode = Join-Path $ProjectRoot "runtime\node.exe"
     $installedServerEntry = Join-Path $ProjectRoot "dist-server\server\index.js"
     $installedUiEntry = Join-Path $ProjectRoot "dist\index.html"
     if ((Test-Path -LiteralPath $bundledNode) -and (Test-Path -LiteralPath $installedServerEntry) -and (Test-Path -LiteralPath $installedUiEntry)) {
-        Write-Host "  Sentinel Tandem Suite - Installed App" -ForegroundColor Cyan
+        Write-Host "  Sentinel Core - Installed App" -ForegroundColor Cyan
         $url = "http://127.0.0.1:$Port"
-        Start-InstalledTandemSuite -BundledNode $bundledNode -ServerEntry $installedServerEntry -PortToUse $Port
+        Start-InstalledSentinelCore -BundledNode $bundledNode -ServerEntry $installedServerEntry -PortToUse $Port
 
         if (-not $NoBrowser) {
             $BrowserProcess = Start-BrowserWindow -Url $url
@@ -752,7 +752,7 @@ try {
 
         Write-Host ""
         Write-Host "Ready: $url" -ForegroundColor Green
-        Write-Host "Close this window or press Ctrl+C to stop Tandem Suite." -ForegroundColor Gray
+        Write-Host "Close this window or press Ctrl+C to stop Sentinel Core." -ForegroundColor Gray
         Write-Host ""
 
         while ($true) {
@@ -762,7 +762,7 @@ try {
                 }
             }
             if (Test-BrowserWindowClosed) {
-                Write-Status "Browser window closed; shutting down Sentinel Tandem Suite" "OK"
+                Write-Status "Browser window closed; shutting down Sentinel Core" "OK"
                 break
             }
             Start-Sleep -Seconds 1
@@ -770,7 +770,7 @@ try {
         return
     }
 
-    Start-SourceTandemSuite
+    Start-SourceSentinelCore
 
     $node = Find-Node
     if (-not $node) { throw "Node.js was not found. Install Node.js 20+ and rerun the launcher." }
@@ -782,7 +782,7 @@ try {
     }
 
     if ($InstallDeps -or -not (Test-Path (Join-Path $ProjectRoot "node_modules"))) {
-        Write-Status "Installing Tandem Suite dependencies"
+        Write-Status "Installing Sentinel Core dependencies"
         & $npm install
         if ($LASTEXITCODE -ne 0) { throw "npm install failed with exit code $LASTEXITCODE." }
     }
@@ -790,7 +790,7 @@ try {
     $serverEntry = Join-Path $ProjectRoot "dist-server\server\index.js"
     $uiEntry = Join-Path $ProjectRoot "dist\index.html"
     if ($SinglePort -and ($Rebuild -or -not (Test-Path $serverEntry) -or -not (Test-Path $uiEntry))) {
-        Write-Status "Building Tandem Suite"
+        Write-Status "Building Sentinel Core"
         & $npm run build
         if ($LASTEXITCODE -ne 0) { throw "npm run build failed with exit code $LASTEXITCODE." }
     }
@@ -802,41 +802,41 @@ try {
         $frontendUrl = "http://127.0.0.1:$FrontendPort"
 
         if (Test-PortOpen -Port $BackendPort) {
-            if (-not (Test-TandemSuite -Port $BackendPort)) {
-                throw "Backend port $BackendPort is already in use by another service. Stop that service or launch Tandem with -BackendPort <free port>."
+            if (-not (Test-SentinelCore -Port $BackendPort)) {
+                throw "Backend port $BackendPort is already in use by another service. Stop that service or launch Sentinel Core with -BackendPort <free port>."
             }
-            Stop-PortOwnerProcess -Port $BackendPort -Label "Sentinel Tandem API"
+            Stop-PortOwnerProcess -Port $BackendPort -Label "Sentinel Core API"
         }
 
         if (-not (Test-PortOpen -Port $BackendPort)) {
-            Write-Status "Starting Tandem API on port $BackendPort"
+            Write-Status "Starting Sentinel Core API on port $BackendPort"
             Start-OwnedProcess -FilePath $npm -ArgumentList @("exec", "--", "tsx", "server/index.ts", "--port", "$BackendPort") -WorkingDirectory $ProjectRoot | Out-Null
             if (-not (Wait-Port -Port $BackendPort -Seconds 30)) {
-                throw "Tandem API did not open port $BackendPort. Check $LogFile."
+                throw "Sentinel Core API did not open port $BackendPort. Check $LogFile."
             }
-            if (-not (Wait-TandemSuite -Port $BackendPort -Seconds 45)) {
-                throw "Port $BackendPort opened, but it is not responding as Sentinel Tandem Suite. Check $LogFile."
+            if (-not (Wait-SentinelCore -Port $BackendPort -Seconds 45)) {
+                throw "Port $BackendPort opened, but it is not responding as Sentinel Core. Check $LogFile."
             }
-            Write-Status "Tandem API is ready" "OK"
+            Write-Status "Sentinel Core API is ready" "OK"
         }
 
         if (Test-PortOpen -Port $FrontendPort) {
-            if (-not (Test-TandemUi -Port $FrontendPort)) {
-                throw "Frontend port $FrontendPort is already in use by another service. Stop that service or launch Tandem with -FrontendPort <free port>."
+            if (-not (Test-SentinelCoreUi -Port $FrontendPort)) {
+                throw "Frontend port $FrontendPort is already in use by another service. Stop that service or launch Sentinel Core with -FrontendPort <free port>."
             }
-            Stop-PortOwnerProcess -Port $FrontendPort -Label "Sentinel Tandem UI"
+            Stop-PortOwnerProcess -Port $FrontendPort -Label "Sentinel Core UI"
         }
 
         if (-not (Test-PortOpen -Port $FrontendPort)) {
-            Write-Status "Starting Tandem Vite UI on port $FrontendPort"
+            Write-Status "Starting Sentinel Core Vite UI on port $FrontendPort"
             Start-OwnedProcess -FilePath $npm -ArgumentList @("exec", "--", "vite", "--host", "127.0.0.1", "--port", "$FrontendPort") -WorkingDirectory $ProjectRoot | Out-Null
             if (-not (Wait-Port -Port $FrontendPort -Seconds 45)) {
-                throw "Tandem UI did not open port $FrontendPort. Check $LogFile."
+                throw "Sentinel Core UI did not open port $FrontendPort. Check $LogFile."
             }
-            if (-not (Test-TandemUi -Port $FrontendPort)) {
-                throw "Tandem UI opened port $FrontendPort, but the dashboard did not respond as expected."
+            if (-not (Test-SentinelCoreUi -Port $FrontendPort)) {
+                throw "Sentinel Core UI opened port $FrontendPort, but the dashboard did not respond as expected."
             }
-            Write-Status "Tandem UI is ready" "OK"
+            Write-Status "Sentinel Core UI is ready" "OK"
         }
 
         if (-not $NoBrowser) {
@@ -847,7 +847,7 @@ try {
         Write-Host ""
         Write-Host "Ready: $frontendUrl" -ForegroundColor Green
         Write-Host "Backend: $backendUrl" -ForegroundColor Gray
-        Write-Host "Close this window or press Ctrl+C to stop Tandem Suite." -ForegroundColor Gray
+        Write-Host "Close this window or press Ctrl+C to stop Sentinel Core." -ForegroundColor Gray
         Write-Host ""
 
         while ($true) {
@@ -857,7 +857,7 @@ try {
                 }
             }
             if (Test-BrowserWindowClosed) {
-                Write-Status "Browser window closed; shutting down Sentinel Tandem Suite" "OK"
+                Write-Status "Browser window closed; shutting down Sentinel Core" "OK"
                 break
             }
             Start-Sleep -Seconds 1
@@ -869,25 +869,25 @@ try {
     $env:NODE_ENV = "production"
 
     if (Test-PortOpen -Port $Port) {
-        if (-not (Test-TandemSuite -Port $Port)) {
-            throw "Port $Port is already in use by another service. Stop that service or launch Tandem with -Port <free port>."
+        if (-not (Test-SentinelCore -Port $Port)) {
+            throw "Port $Port is already in use by another service. Stop that service or launch Sentinel Core with -Port <free port>."
         }
-        Stop-PortOwnerProcess -Port $Port -Label "Sentinel Tandem Suite"
+        Stop-PortOwnerProcess -Port $Port -Label "Sentinel Core"
     }
 
     if (-not (Test-PortOpen -Port $Port)) {
-        Write-Status "Starting Tandem Suite on port $Port"
+        Write-Status "Starting Sentinel Core on port $Port"
         Start-OwnedProcess -FilePath $node -ArgumentList @("dist-server\server\index.js", "--port", "$Port") -WorkingDirectory $ProjectRoot | Out-Null
         if (-not (Wait-Port -Port $Port -Seconds 30)) {
-            throw "Tandem Suite did not open port $Port. Check $LogFile."
+            throw "Sentinel Core did not open port $Port. Check $LogFile."
         }
-        if (-not (Wait-TandemSuite -Port $Port -Seconds 45)) {
-            throw "Port $Port opened, but it is not responding as Sentinel Tandem Suite. Check $LogFile."
+        if (-not (Wait-SentinelCore -Port $Port -Seconds 45)) {
+            throw "Port $Port opened, but it is not responding as Sentinel Core. Check $LogFile."
         }
-        if (-not (Test-TandemUi -Port $Port)) {
-            throw "Tandem API is ready, but the dashboard UI did not respond as expected."
+        if (-not (Test-SentinelCoreUi -Port $Port)) {
+            throw "Sentinel Core API is ready, but the dashboard UI did not respond as expected."
         }
-        Write-Status "Tandem Suite is ready" "OK"
+        Write-Status "Sentinel Core is ready" "OK"
     }
 
     $url = "http://127.0.0.1:$Port"
@@ -898,7 +898,7 @@ try {
 
     Write-Host ""
     Write-Host "Ready: $url" -ForegroundColor Green
-    Write-Host "Close this window or press Ctrl+C to stop Tandem Suite." -ForegroundColor Gray
+    Write-Host "Close this window or press Ctrl+C to stop Sentinel Core." -ForegroundColor Gray
     Write-Host ""
 
     while ($true) {
@@ -908,7 +908,7 @@ try {
             }
         }
         if (Test-BrowserWindowClosed) {
-            Write-Status "Browser window closed; shutting down Sentinel Tandem Suite" "OK"
+            Write-Status "Browser window closed; shutting down Sentinel Core" "OK"
             break
         }
         Start-Sleep -Seconds 1

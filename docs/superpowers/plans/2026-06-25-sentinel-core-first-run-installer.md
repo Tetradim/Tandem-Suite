@@ -1,4 +1,4 @@
-# Sentinel Tandem Suite First-Run Installer Implementation Plan
+# Sentinel Core First-Run Installer Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -22,8 +22,8 @@
 ### Task 2: Launcher installed mode
 
 **Files:**
-- Modify: `Launch-Sentinel-Tandem.bat`
-- Modify: `Launch-Sentinel-Tandem.ps1`
+- Modify: `Launch-Sentinel-Core.bat`
+- Modify: `Launch-Sentinel-Core.ps1`
 
 - [ ] Harden the batch wrapper for partial extracts and forward arguments.
 - [ ] Add installed launcher mode using bundled `runtime\node.exe`.
@@ -38,5 +38,5 @@
 - [ ] Build `dist-server` and `dist`.
 - [ ] Install production dependencies into the release folder.
 - [ ] Copy bundled Node runtime and launcher pair.
-- [ ] Build/upload `SentinelTandem-Setup-<version>.exe`.
+- [ ] Build/upload `SentinelCore-Setup-<version>.exe`.
 - [ ] Document beta installer behavior and support logs.

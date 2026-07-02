@@ -41,7 +41,7 @@ type TabKey = 'matrix' | 'edge' | 'pulse' | 'trade' | 'risk' | 'strategy' | 'ops
 
 type Feature = {
   name: string;
-  source: 'Edge' | 'Pulse' | 'Tandem';
+  source: 'Edge' | 'Pulse' | 'Sentinel Core';
   endpoint: string;
   service?: ServiceResult<unknown>;
   detail?: string;
@@ -329,7 +329,7 @@ export function App() {
       <header className="topbar">
         <div className="brand">
           <span className="brand-kicker">Tetradim Sentinel</span>
-          <span className="brand-title">Tandem</span>
+          <span className="brand-title">Sentinel Core</span>
         </div>
 
         <div className="command-strip" aria-label="Service status">
@@ -345,7 +345,7 @@ export function App() {
         </button>
       </header>
 
-      <nav className="tabbar" aria-label="Tandem sections">
+      <nav className="tabbar" aria-label="Sentinel Core sections">
         {tabs.map((tab) => (
           <button key={tab.key} className={`tab ${activeTab === tab.key ? 'active' : ''}`} type="button" onClick={() => setActiveTab(tab.key)}>
             {tab.icon}
@@ -497,7 +497,7 @@ function MatrixTab({ model, loading, snapshot }: { model: ReturnType<typeof buil
       <section className="hero-matrix">
         <div className="hero-copy">
           <span className="section-code">DATA MATRIX 05</span>
-          <h1>Tandem Control Surface</h1>
+          <h1>Sentinel Core Control Surface</h1>
           <p>Edge signal intelligence, Pulse broker execution, and the bridge state between them.</p>
         </div>
         <div className="hero-metrics">
@@ -515,7 +515,7 @@ function MatrixTab({ model, loading, snapshot }: { model: ReturnType<typeof buil
 
         <Panel title="Shared Trade State" caption="Edge intent against Pulse truth" wide>
           {loading ? (
-            <EmptyState title="Loading services" body="Waiting for the Tandem snapshot." />
+            <EmptyState title="Loading services" body="Waiting for the Sentinel Core snapshot." />
           ) : model.primary ? (
             <TradeState position={model.primary} edgePosition={model.edgePosition} decision={model.decision} lastHandoff={model.lastHandoff} />
           ) : (
@@ -647,7 +647,7 @@ function TradeTab({ model, snapshot, loading }: { model: ReturnType<typeof build
     >
       <Panel title="Shared Trade State" caption="selected position">
         {loading ? (
-          <EmptyState title="Loading services" body="Waiting for the Tandem snapshot." />
+          <EmptyState title="Loading services" body="Waiting for the Sentinel Core snapshot." />
         ) : model.primary ? (
           <TradeState position={model.primary} edgePosition={model.edgePosition} decision={model.decision} lastHandoff={model.lastHandoff} />
         ) : (
@@ -788,7 +788,7 @@ function TabLayout({
     <div className="tab-page">
       <section className="tab-hero">
         <div>
-          <span className="section-code">TANDEM SURFACE</span>
+          <span className="section-code">SENTINEL CORE SURFACE</span>
           <h1>{title}</h1>
         </div>
         <div className="deck">

@@ -11,8 +11,9 @@ import {
   buildChromeBridgeMessageEvent,
   isLocalBridgeAddress,
 } from './chromeDiscordBridge.js';
+import { evaluateOperatorAuthPolicy } from './operatorAuthPolicy.js';
 import { evaluateRelayPolicy } from './relayPolicy.js';
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import type {
   AnyPayload,
   EdgeAutomation,
@@ -27,7 +28,7 @@ import type {
 } from '../src/types.js';
 
 dotenv.config({ path: '.env' });
-dotenv.config({ path: '.env.local', override: true });
+dotenv.config({ path: '.env.local' });
 
 const DEFAULT_EDGE_URL = 'http://localhost:8000';
 const DEFAULT_PULSE_URL = 'http://localhost:8001';
@@ -35,7 +36,8 @@ const DEFAULT_REFRESH_MS = 5000;
 const DEFAULT_PRODUCTION_PORT = 3005;
 const DEFAULT_API_PORT = 8005;
 const DEFAULT_LISTEN_HOST = '127.0.0.1';
-const REQUEST_TIMEOUT_MS = 4500;
+const REQUEST_TIMEOUT_MS = numberFrom(process.env.SENTINEL_CORE_REQUEST_TIMEOUT_MS, 4500);
+const SLOW_REQUEST_TIMEOUT_MS = numberFrom(process.env.SENTINEL_CORE_SLOW_REQUEST_TIMEOUT_MS, 15000);
 
 function stripTrailingSlash(value: string) {
   return value.replace(/\/+$/, '');
@@ -89,10 +91,15 @@ function getErrorMessage(payload: unknown, fallback: string) {
   return fallback;
 }
 
-async function fetchJson<T>(baseUrl: string, endpoint: string, headers: HeadersInit = {}): Promise<ServiceResult<T>> {
+async function fetchJson<T>(
+  baseUrl: string,
+  endpoint: string,
+  headers: HeadersInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<ServiceResult<T>> {
   const started = performance.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${baseUrl}${endpoint}`, {
@@ -131,17 +138,23 @@ async function fetchJson<T>(baseUrl: string, endpoint: string, headers: HeadersI
       ok: false,
       latencyMs: Math.round(performance.now() - started),
       updatedAt: new Date().toISOString(),
-      error: isAbort ? `Request timed out after ${REQUEST_TIMEOUT_MS} ms` : error instanceof Error ? error.message : String(error),
+      error: isAbort ? `Request timed out after ${timeoutMs} ms` : error instanceof Error ? error.message : String(error),
     };
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function postJson<T>(baseUrl: string, endpoint: string, body: unknown, headers: HeadersInit = {}): Promise<ServiceResult<T>> {
+async function postJson<T>(
+  baseUrl: string,
+  endpoint: string,
+  body: unknown,
+  headers: HeadersInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<ServiceResult<T>> {
   const started = performance.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`${baseUrl}${endpoint}`, {
@@ -183,7 +196,7 @@ async function postJson<T>(baseUrl: string, endpoint: string, body: unknown, hea
       ok: false,
       latencyMs: Math.round(performance.now() - started),
       updatedAt: new Date().toISOString(),
-      error: isAbort ? `Request timed out after ${REQUEST_TIMEOUT_MS} ms` : error instanceof Error ? error.message : String(error),
+      error: isAbort ? `Request timed out after ${timeoutMs} ms` : error instanceof Error ? error.message : String(error),
     };
   } finally {
     clearTimeout(timeout);
@@ -209,11 +222,16 @@ function ensureLocalBridgeRequest(request: Request, response: Response) {
 async function loadSnapshot(): Promise<SuiteSnapshot> {
   const config = suiteConfig();
   const pulseHeaders = pulseEdgeHeaders();
-  const missingPulseKey = 'PULSE_EDGE_API_KEY is not configured on the Tandem server.';
+  const missingPulseKey = 'PULSE_EDGE_API_KEY is not configured on the Sentinel Core server.';
   const edge = <T = AnyPayload>(endpoint: string) => fetchJson<T>(config.edgeBaseUrl, endpoint);
+  const edgeSlow = <T = AnyPayload>(endpoint: string) => fetchJson<T>(config.edgeBaseUrl, endpoint, {}, SLOW_REQUEST_TIMEOUT_MS);
   const pulse = <T = AnyPayload>(endpoint: string) => fetchJson<T>(config.pulseBaseUrl, endpoint);
   const pulseEdge = <T>(endpoint: string) =>
     pulseHeaders ? fetchJson<T>(config.pulseBaseUrl, endpoint, pulseHeaders) : Promise.resolve(configError<T>(missingPulseKey));
+  const pulseEdgeSlow = <T>(endpoint: string) =>
+    pulseHeaders
+      ? fetchJson<T>(config.pulseBaseUrl, endpoint, pulseHeaders, SLOW_REQUEST_TIMEOUT_MS)
+      : Promise.resolve(configError<T>(missingPulseKey));
 
   const [
     edgeLive,
@@ -296,12 +314,12 @@ async function loadSnapshot(): Promise<SuiteSnapshot> {
     edge('/api/correlation'),
     edge<Record<string, unknown>>('/api/pulse/handoff/schema'),
     edge('/api/pulse/status'),
-    edge<Record<string, unknown>>('/api/pulse/account'),
+    edgeSlow<Record<string, unknown>>('/api/pulse/account'),
     edge<Record<string, unknown>>('/api/pulse/positions'),
     edge('/api/pulse/queue'),
     pulse<Record<string, unknown>>('/api/health'),
     pulseEdge<PulseEdgeStatus>('/api/edge/status'),
-    pulseEdge<PulseAccount>('/api/edge/account/status'),
+    pulseEdgeSlow<PulseAccount>('/api/edge/account/status'),
     pulseEdge<PulseTickerResponse>('/api/edge/tickers'),
     pulseEdge<AnyPayload>('/api/edge/bot/status'),
     pulseEdge<AnyPayload>('/api/edge/bot/snapshot'),
@@ -324,7 +342,7 @@ async function loadSnapshot(): Promise<SuiteSnapshot> {
     pulseEdge<AnyPayload>('/api/edge/risk/limits'),
     pulseEdge<AnyPayload>('/api/edge/reconciliation/summary'),
     pulseEdge<AnyPayload>('/api/edge/portfolio/stats'),
-    pulseEdge<AnyPayload>('/api/edge/orders'),
+    pulseEdgeSlow<AnyPayload>('/api/edge/orders'),
     pulseEdge<AnyPayload>('/api/edge/orders/stats'),
     pulseEdge<AnyPayload>('/api/edge/analytics/portfolio'),
     pulseEdge<AnyPayload>('/api/edge/ops/services'),
@@ -398,6 +416,20 @@ const distIndex = path.join(distPath, 'index.html');
 const port = numberFrom(cliValue('--port') || process.env.PORT, process.env.NODE_ENV === 'production' ? DEFAULT_PRODUCTION_PORT : DEFAULT_API_PORT);
 const host = resolveListenHost();
 
+function requireOperatorAccess(request: Request, response: Response, next: NextFunction) {
+  const decision = evaluateOperatorAuthPolicy({
+    host,
+    nodeEnv: process.env.NODE_ENV,
+    expectedSecret: process.env.SENTINEL_CORE_OPERATOR_SECRET,
+    providedSecret: request.get('X-Sentinel-Core-Operator-Secret'),
+  });
+  if (!decision.allowed) {
+    response.status(decision.status).json({ error: decision.error });
+    return;
+  }
+  next();
+}
+
 app.disable('x-powered-by');
 app.use(compression());
 app.use(express.json({ limit: '512kb' }));
@@ -415,28 +447,29 @@ app.use(
     },
   }),
 );
+app.use('/api', requireOperatorAccess);
 
-app.get('/api/tandem/config', (_request, response) => {
+app.get('/api/sentinel-core/config', (_request, response) => {
   response.json(suiteConfig());
 });
 
-app.get('/api/tandem/snapshot', async (_request, response) => {
+app.get('/api/sentinel-core/snapshot', async (_request, response) => {
   response.json(await loadSnapshot());
 });
 
-app.get('/api/tandem/bus/events', (request, response) => {
+app.get('/api/sentinel-core/bus/events', (request, response) => {
   const limit = numberFrom(String(request.query.limit || ''), 100);
   const target = typeof request.query.target === 'string' ? request.query.target : undefined;
   const events = listEvents(limit, target);
   response.json({ events, count: events.length });
 });
 
-app.post('/api/tandem/bus/events', (request, response) => {
+app.post('/api/sentinel-core/bus/events', (request, response) => {
   try {
     const policy = evaluateBusIngressPolicy({
-      enabled: process.env.TANDEM_BUS_INGRESS_ENABLED,
-      expectedSecret: process.env.TANDEM_BUS_INGRESS_SECRET,
-      providedSecret: request.get('X-Tandem-Bus-Secret'),
+      enabled: process.env.SENTINEL_CORE_BUS_INGRESS_ENABLED,
+      expectedSecret: process.env.SENTINEL_CORE_BUS_INGRESS_SECRET,
+      providedSecret: request.get('X-Sentinel-Core-Bus-Secret'),
       event: request.body || {},
     });
     if (!policy.allowed) {
@@ -488,7 +521,7 @@ app.post('/api/discord/chrome-bridge/heartbeat', (request, response) => {
   }
 });
 
-app.get('/api/tandem/bus/ecosystem', async (request, response) => {
+app.get('/api/sentinel-core/bus/ecosystem', async (request, response) => {
   const config = suiteConfig();
   const limit = numberFrom(String(request.query.limit || ''), 100);
   const pulseHeaders = pulseEdgeHeaders() || {};
@@ -500,13 +533,13 @@ app.get('/api/tandem/bus/ecosystem', async (request, response) => {
   response.json({ local, edge, pulse });
 });
 
-app.post('/api/tandem/bus/relay', async (request, response) => {
+app.post('/api/sentinel-core/bus/relay', async (request, response) => {
   const config = suiteConfig();
   const body = request.body || {};
   const policy = evaluateRelayPolicy({
-    enabled: process.env.TANDEM_RELAY_ENABLED,
-    expectedSecret: process.env.TANDEM_RELAY_SECRET,
-    providedSecret: request.get('X-Tandem-Relay-Secret'),
+    enabled: process.env.SENTINEL_CORE_RELAY_ENABLED,
+    expectedSecret: process.env.SENTINEL_CORE_RELAY_SECRET,
+    providedSecret: request.get('X-Sentinel-Core-Relay-Secret'),
     targetService: body.targetService,
     target_service: body.target_service,
     endpoint: body.endpoint,
@@ -519,7 +552,7 @@ app.post('/api/tandem/bus/relay', async (request, response) => {
   const event = body.event || body;
   const pulseHeaders = pulseEdgeHeaders();
   if (policy.target === 'pulse' && !pulseHeaders) {
-    response.status(503).json({ error: 'Pulse relay requires PULSE_EDGE_API_KEY on the Tandem server.' });
+    response.status(503).json({ error: 'Pulse relay requires PULSE_EDGE_API_KEY on the Sentinel Core server.' });
     return;
   }
   const routes: Record<string, { baseUrl: string; headers?: HeadersInit }> = {
@@ -529,8 +562,8 @@ app.post('/api/tandem/bus/relay', async (request, response) => {
   const route = routes[policy.target];
   const relay = await postJson(route.baseUrl, policy.endpoint, event, route.headers || {});
   publishEvent({
-    event_type: 'tandem.relay.attempted',
-    source: 'tandem-suite',
+    event_type: 'sentinel-core.relay.attempted',
+    source: 'sentinel-core',
     target: policy.target,
     payload: { endpoint: policy.endpoint, relay },
   });
@@ -545,5 +578,5 @@ if (fs.existsSync(distIndex)) {
 }
 
 app.listen(port, host, () => {
-  process.stdout.write(`Tandem Suite listening on http://${host}:${port}\n`);
+  process.stdout.write(`Sentinel Core listening on http://${host}:${port}\n`);
 });

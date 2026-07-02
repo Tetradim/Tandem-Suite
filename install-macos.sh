@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_NAME="Sentinel Tandem Suite"
-DESKTOP_COMMAND_NAME="Sentinel Tandem Suite.command"
+APP_NAME="Sentinel Core"
+DESKTOP_COMMAND_NAME="Sentinel Core.command"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_FILE="${HOME}/Desktop/Sentinel-Tandem-Suite.log"
+LOG_FILE="${HOME}/Desktop/Sentinel-Core.log"
 BACKEND_PORT=8005
 FRONTEND_PORT=3005
 EDGE_API_URL="${EDGE_API_URL:-http://localhost:8000}"
@@ -22,8 +22,8 @@ Usage:
   ./install-macos.sh --launch        Start ${APP_NAME}
 
 Options:
-  --backend-port PORT       Tandem connector port (default: ${BACKEND_PORT})
-  --frontend-port PORT      Tandem UI port (default: ${FRONTEND_PORT})
+  --backend-port PORT       Sentinel Core connector port (default: ${BACKEND_PORT})
+  --frontend-port PORT      Sentinel Core UI port (default: ${FRONTEND_PORT})
   --edge-api-url URL        Sentinel Edge URL (default: ${EDGE_API_URL})
   --pulse-api-url URL       Sentinel Pulse URL (default: ${PULSE_API_URL})
   --pulse-edge-api-key KEY  Pulse Edge API key, if required
@@ -154,11 +154,11 @@ launch_app() {
   export PULSE_API_URL
   export PULSE_EDGE_API_KEY
 
-  log "Starting Tandem connector on ${backend_url}"
+  log "Starting Sentinel Core connector on ${backend_url}"
   (cd "$ROOT_DIR" && npm exec -- tsx server/index.ts --port "$BACKEND_PORT") >> "$LOG_FILE" 2>&1 &
   pids+=("$!")
 
-  log "Starting Tandem UI on ${frontend_url}"
+  log "Starting Sentinel Core UI on ${frontend_url}"
   (cd "$ROOT_DIR" && npm exec -- vite --host 127.0.0.1 --port "$FRONTEND_PORT") >> "$LOG_FILE" 2>&1 &
   pids+=("$!")
 
@@ -169,7 +169,7 @@ launch_app() {
   }
   trap cleanup EXIT INT TERM
 
-  if ! wait_url "${backend_url}/api/tandem/snapshot" 75; then
+  if ! wait_url "${backend_url}/api/sentinel-core/snapshot" 75; then
     log "Connector did not become ready. Recent log output:"
     tail -n 100 "$LOG_FILE" || true
     exit 1

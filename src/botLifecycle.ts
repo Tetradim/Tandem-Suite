@@ -4,7 +4,7 @@ export type ExecutionLifecyclePhase = 'pending' | 'requested' | 'accepted' | 'su
 
 export type ExecutionLifecycle = {
   phase: ExecutionLifecyclePhase;
-  owner: 'Sentinel Edge' | 'Sentinel Pulse' | 'Tandem';
+  owner: 'Sentinel Edge' | 'Sentinel Pulse' | 'Sentinel Core';
   title: string;
   note: string;
   tone: ServiceTone;
@@ -69,7 +69,7 @@ export function normalizeExecutionLifecycle(handoff?: Record<string, unknown> | 
   if (!Object.keys(record).length) {
     return {
       phase: 'pending',
-      owner: 'Tandem',
+      owner: 'Sentinel Core',
       title: 'No handoff',
       note: 'No Edge-to-Pulse handoff has been reported.',
       tone: 'warn',
@@ -96,7 +96,7 @@ export function normalizeExecutionLifecycle(handoff?: Record<string, unknown> | 
       phase: 'submitted',
       owner: 'Sentinel Pulse',
       title: 'Pulse submitted',
-      note: 'Pulse submitted the order path; Tandem is waiting for a broker-confirmed fill report.',
+      note: 'Pulse submitted the order path; Sentinel Core is waiting for a broker-confirmed fill report.',
       tone: 'neutral',
     };
   }
